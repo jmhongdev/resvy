@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import { errorHandler } from './middleware/errorHandler';
 import healthRoute from './routes/healthRoute';
 import authRoute from './routes/authRoute';
+import amenityRoute from './routes/amenityRoute';
 
 const app = express();
 
@@ -19,6 +20,7 @@ app.use(express.json());
 // Routes
 app.use('/health', healthRoute);
 app.use('/auth', authRoute);
+app.use('/amenities', amenityRoute);
 
 // 404 handler — catches any route that doesn't match above
 app.use((req, res) => {
