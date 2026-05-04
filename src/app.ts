@@ -5,6 +5,7 @@ import { errorHandler } from './middleware/errorHandler';
 import healthRoute from './routes/healthRoute';
 import authRoute from './routes/authRoute';
 import amenityRoute from './routes/amenityRoute';
+import bookingRoute from './routes/bookingRoute';
 
 const app = express();
 
@@ -21,6 +22,7 @@ app.use(express.json());
 app.use('/health', healthRoute);
 app.use('/auth', authRoute);
 app.use('/amenities', amenityRoute);
+app.use('/bookings', bookingRoute);
 
 // 404 handler — catches any route that doesn't match above
 app.use((req, res) => {
