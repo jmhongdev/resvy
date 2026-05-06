@@ -6,6 +6,7 @@ import healthRoute from './routes/healthRoute';
 import authRoute from './routes/authRoute';
 import amenityRoute from './routes/amenityRoute';
 import bookingRoute from './routes/bookingRoute';
+import statsRoute from './routes/statsRoute';
 
 const app = express();
 
@@ -23,6 +24,7 @@ app.use('/health', healthRoute);
 app.use('/auth', authRoute);
 app.use('/amenities', amenityRoute);
 app.use('/bookings', bookingRoute);
+app.use('/stats',    statsRoute);
 
 // 404 handler — catches any route that doesn't match above
 app.use((req, res) => {
