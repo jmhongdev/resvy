@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import swaggerUi from 'swagger-ui-express';
+import { swaggerSpec } from './config/swagger';
 import { errorHandler } from './middleware/errorHandler';
 import healthRoute from './routes/healthRoute';
 import authRoute from './routes/authRoute';
@@ -19,7 +21,9 @@ app.use(cors());
 // Parse incoming JSON request bodies
 app.use(express.json());
 
-// Routes
+// API documentation hosted at /api/docs
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
 app.use('/health', healthRoute);
 app.use('/auth', authRoute);
 app.use('/amenities', amenityRoute);

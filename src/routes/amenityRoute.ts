@@ -4,21 +4,157 @@ import * as amenityController from '../controllers/amenityController';
 
 const router = Router();
 
-// All amenity routes require a logged in user
 router.use(authenticate);
 
-// GET /amenities — all residents can list amenities
+/**
+ * @openapi
+ * /amenities:
+ *   get:
+ *     tags: [Amenities]
+ *     summary: List all amenities for the resident's building
+ *     responses:
+ *       200:
+ *         description: List of amenities
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Amenity'
+ *       401:
+ *         description: Unauthorized
+ */
 router.get('/', amenityController.getAmenities);
 
-// GET /amenities/:id — get single amenity
+/**
+ * @openapi
+ * /amenities/{id}:
+ *   get:
+ *     tags: [Amenities]
+ *     summary: Get a single amenity by ID
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Amenity details
+ *       404:
+ *         description: Amenity not found
+ */
 router.get('/:id', amenityController.getAmenity);
 
-// GET /amenities/:id/availability?date=YYYY-MM-DD
+/**
+ * @openapi
+ * /amenities/{id}/availability:
+ *   get:
+ *     tags: [Amenities]
+ *     summary: Get available time slots for an amenity on a given date
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: date
+ *         required: true
+ *         schema:
+ *           type: string
+ *           example: '2026-05-10'
+ *     responses:
+ *       200:
+ *         description: Available slots
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     amenity_id: { type: string }
+ *                     date:       { type: string }
+ *                     slots:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           start_time: { type: string }
+ *                           end_time:   { type: string }
+ *                           available:  { type: boolean }
+ */
 router.get('/:id/availability', amenityController.getAvailability);
 
-// Admin only routes below
-router.post('/',        requireAdmin, amenityController.createAmenity);
-router.patch('/:id',    requireAdmin, amenityController.updateAmenity);
-router.delete('/:id',   requireAdmin, amenityController.deactivateAmenity);
+/**
+ * @openapi
+ * /amenities:
+ *   post:
+ *     tags: [Amenities]
+ *     summary: Create a new amenity (admin only)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/Amenity'
+ *     responses:
+ *       201:
+ *         description: Amenity created
+ *       403:
+ *         description: Admin access required
+ */
+router.post('/',      requireAdmin, amenityController.createAmenity);
+
+/**
+ * @openapi
+ * /amenities/{id}:
+ *   patch:
+ *     tags: [Amenities]
+ *     summary: Update an amenity (admin only)
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Amenity updated
+ *       403:
+ *         description: Admin access required
+ *       404:
+ *         description: Amenity not found
+ */
+router.patch('/:id',  requireAdmin, amenityController.updateAmenity);
+
+/**
+ * @openapi
+ * /amenities/{id}:
+ *   delete:
+ *     tags: [Amenities]
+ *     summary: Deactivate an amenity (admin only)
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Amenity deactivated
+ *       403:
+ *         description: Admin access required
+ *       404:
+ *         description: Amenity not found
+ */
+router.delete('/:id', requireAdmin, amenityController.deactivateAmenity);
 
 export default router;

@@ -4,14 +4,69 @@ import * as statsController from '../controllers/statsController';
 
 const router = Router();
 
-// All stats are admin only
 router.use(authenticate);
 router.use(requireAdmin);
 
-router.get('/overview',        statsController.getOverview);
-router.get('/amenities',       statsController.getAmenityStats);
-router.get('/peak-hours',      statsController.getPeakHours);
-router.get('/monthly-trends',  statsController.getMonthlyTrends);
-router.get('/residents',       statsController.getResidentStats);
+/**
+ * @openapi
+ * /stats/overview:
+ *   get:
+ *     tags: [Stats]
+ *     summary: Building overview stats (admin only)
+ *     responses:
+ *       200:
+ *         description: Overview statistics
+ *       403:
+ *         description: Admin access required
+ */
+router.get('/overview', statsController.getOverview);
+
+/**
+ * @openapi
+ * /stats/amenities:
+ *   get:
+ *     tags: [Stats]
+ *     summary: Amenity utilization rates (admin only)
+ *     responses:
+ *       200:
+ *         description: Utilization stats per amenity
+ */
+router.get('/amenities', statsController.getAmenityStats);
+
+/**
+ * @openapi
+ * /stats/peak-hours:
+ *   get:
+ *     tags: [Stats]
+ *     summary: Peak booking hours (admin only)
+ *     responses:
+ *       200:
+ *         description: Booking count per hour
+ */
+router.get('/peak-hours', statsController.getPeakHours);
+
+/**
+ * @openapi
+ * /stats/monthly-trends:
+ *   get:
+ *     tags: [Stats]
+ *     summary: Monthly booking trends (admin only)
+ *     responses:
+ *       200:
+ *         description: Monthly booking counts for last 6 months
+ */
+router.get('/monthly-trends', statsController.getMonthlyTrends);
+
+/**
+ * @openapi
+ * /stats/residents:
+ *   get:
+ *     tags: [Stats]
+ *     summary: Resident activity stats (admin only)
+ *     responses:
+ *       200:
+ *         description: Booking activity per resident
+ */
+router.get('/residents', statsController.getResidentStats);
 
 export default router;
