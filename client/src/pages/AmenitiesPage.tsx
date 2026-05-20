@@ -2,12 +2,14 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getAmenities } from '../api/amenities';
 import type { Amenity } from '../api/amenities';
+import { useAuth } from '../context/useAuth';
 
 export default function AmenitiesPage() {
   const navigate = useNavigate();
   const [amenities, setAmenities] = useState<Amenity[]>([]);
   const [loading,   setLoading]   = useState(true);
   const [error,     setError]     = useState('');
+  const { isAdmin } = useAuth();
 
   useEffect(() => {
     async function load() {
@@ -58,12 +60,14 @@ export default function AmenitiesPage() {
               </span>
             </div>
 
-            <button
-              style={styles.bookBtn}
-              onClick={() => navigate(`/amenities/${amenity.id}/availability`)}
-            >
-              예약하기
-            </button>
+            {!isAdmin && (
+              <button
+                style={styles.bookBtn}
+                onClick={() => navigate(`/amenities/${amenity.id}/availability`)}
+              >
+                예약하기
+              </button>
+            )}
           </div>
         ))}
       </div>

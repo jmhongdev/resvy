@@ -3,16 +3,21 @@ import { getMyBookings, cancelBooking } from '../api/bookings';
 import type { Booking } from '../api/bookings';
 
 export default function MyBookingsPage() {
-  const [upcoming, setUpcoming] = useState<Booking[]>([]);
-  const [past,     setPast]     = useState<Booking[]>([]);
-  const [loading,  setLoading]  = useState(true);
-  const [error,    setError]    = useState('');
+  const [upcoming,        setUpcoming]        = useState<Booking[]>([]);
+  const [past,            setPast]            = useState<Booking[]>([]);
+  const [loading,         setLoading]         = useState(true);
+  const [error,           setError]           = useState('');
+  const [showCancelled,   setShowCancelled]   = useState(false);
 
   useEffect(() => {
     async function load() {
       try {
         const data = await getMyBookings();
-        setUpcoming(data.upcoming);
+
+        // Only show confirmed/completed in upcoming
+        setUpcoming(data.upcoming.filter(b => b.status !== 'cancelled'));
+
+        // Past shows all records but cancelled can be toggled
         setPast(data.past);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load bookings');
@@ -22,19 +27,22 @@ export default function MyBookingsPage() {
     }
     load();
   }, []);
-  
+
   async function handleCancel(id: string) {
     if (!confirm('Cancel this booking?')) return;
     try {
       await cancelBooking(id);
-      // Reload after cancel
       const data = await getMyBookings();
-      setUpcoming(data.upcoming);
+      setUpcoming(data.upcoming.filter(b => b.status !== 'cancelled'));
       setPast(data.past);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to cancel booking');
     }
   }
+
+  // Separate past into non-cancelled and cancelled
+  const pastNormal    = past.filter(b => b.status !== 'cancelled');
+  const pastCancelled = past.filter(b => b.status === 'cancelled');
 
   if (loading) return <div style={styles.center}>Loading bookings...</div>;
 
@@ -44,6 +52,7 @@ export default function MyBookingsPage() {
 
       {error && <div style={styles.error}>{error}</div>}
 
+      {/* Upcoming */}
       <section style={styles.section}>
         <h2 style={styles.sectionTitle}>Upcoming</h2>
         {upcoming.length === 0 ? (
@@ -60,14 +69,35 @@ export default function MyBookingsPage() {
         )}
       </section>
 
+      {/* Past */}
       <section style={styles.section}>
         <h2 style={styles.sectionTitle}>Past</h2>
-        {past.length === 0 ? (
+        {pastNormal.length === 0 && pastCancelled.length === 0 ? (
           <p style={styles.empty}>No past bookings.</p>
         ) : (
-          past.map(booking => (
-            <BookingCard key={booking.id} booking={booking} />
-          ))
+          <>
+            {pastNormal.map(booking => (
+              <BookingCard key={booking.id} booking={booking} />
+            ))}
+
+            {/* Cancelled toggle */}
+            {pastCancelled.length > 0 && (
+              <>
+                <button
+                  onClick={() => setShowCancelled(prev => !prev)}
+                  style={styles.toggleBtn}
+                >
+                  {showCancelled
+                    ? `Hide cancelled (${pastCancelled.length})`
+                    : `Show cancelled (${pastCancelled.length})`}
+                </button>
+
+                {showCancelled && pastCancelled.map(booking => (
+                  <BookingCard key={booking.id} booking={booking} />
+                ))}
+              </>
+            )}
+          </>
         )}
       </section>
     </div>
@@ -84,15 +114,25 @@ function BookingCard({
   showCancel?: boolean;
 }) {
   return (
-    <div style={styles.card}>
+    <div style={{
+      ...styles.card,
+      ...(booking.status === 'cancelled' ? styles.cardCancelled : {}),
+    }}>
       <div style={styles.cardTop}>
         <div>
-          <p style={styles.amenityName}>{booking.amenity_name}</p>
+          <p style={{
+            ...styles.amenityName,
+            ...(booking.status === 'cancelled' ? styles.textMuted : {}),
+          }}>
+            {booking.amenity_name}
+          </p>
           <p style={styles.cardDetail}>📍 {booking.amenity_location}</p>
         </div>
         <span style={{
           ...styles.statusBadge,
-          ...(booking.status === 'cancelled' ? styles.badgeCancelled : styles.badgeConfirmed),
+          ...(booking.status === 'cancelled'  ? styles.badgeCancelled  : {}),
+          ...(booking.status === 'confirmed'  ? styles.badgeConfirmed  : {}),
+          ...(booking.status === 'completed'  ? styles.badgeCompleted  : {}),
         }}>
           {booking.status}
         </span>
@@ -144,6 +184,11 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     gap:           '0.5rem',
   },
+  cardCancelled: {
+    background: '#fafafa',
+    boxShadow:  'none',
+    border:     '1px solid #f0f0f0',
+  },
   cardTop: {
     display:        'flex',
     justifyContent: 'space-between',
@@ -152,6 +197,9 @@ const styles: Record<string, React.CSSProperties> = {
   amenityName: {
     fontWeight: 600,
     color:      '#1a1a1a',
+  },
+  textMuted: {
+    color: '#aaa',
   },
   cardDetail: {
     fontSize: '0.875rem',
@@ -168,8 +216,12 @@ const styles: Record<string, React.CSSProperties> = {
     color:      '#16a34a',
   },
   badgeCancelled: {
-    background: '#fef2f2',
-    color:      '#dc2626',
+    background: '#f5f5f5',
+    color:      '#999',
+  },
+  badgeCompleted: {
+    background: '#eff6ff',
+    color:      '#2563eb',
   },
   cancelBtn: {
     alignSelf:    'flex-start',
@@ -179,6 +231,15 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '8px',
     color:        '#dc2626',
     fontSize:     '0.8rem',
+  },
+  toggleBtn: {
+    background:   'transparent',
+    border:       'none',
+    color:        '#2563eb',
+    fontSize:     '0.875rem',
+    padding:      '0.5rem 0',
+    marginBottom: '0.5rem',
+    textDecoration: 'underline',
   },
   empty: {
     color:   '#999',
@@ -194,8 +255,8 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: '1rem',
   },
   center: {
-    padding:   '4rem',
-    textAlign: 'center',
-    color:     '#666',
+    padding:        '4rem',
+    textAlign:      'center',
+    color:          '#666',
   },
 };
