@@ -154,7 +154,8 @@ export async function getMyBookings(userId: string) {
 export async function cancelBooking(
   bookingId:  string,
   userId:     string,
-  buildingId: string
+  buildingId: string,
+  userRole:   string
 ) {
   const client = await pool.connect();
 
@@ -176,8 +177,9 @@ export async function cancelBooking(
 
     const booking = bookingResult.rows[0];
 
-    // 2. Only the booking owner or an admin can cancel
-    if (booking.user_id !== userId) {
+    // 2. Admins can cancel any booking in their building
+    // Residents can only cancel their own
+    if (userRole !== 'admin' && booking.user_id !== userId) {
       throw new Error('UNAUTHORIZED');
     }
 

@@ -94,7 +94,8 @@ export async function cancelBooking(
     const bookingId = req.params.id as string;
     const userId    = req.user!.userId;
     const buildingId = req.user!.buildingId;
-    const booking   = await bookingService.cancelBooking(bookingId, userId, buildingId);
+    const userRole   = req.user!.role;
+    const booking   = await bookingService.cancelBooking(bookingId, userId, buildingId, userRole);
 
     res.status(200).json({ success: true, data: booking });
   } catch (error: unknown) {

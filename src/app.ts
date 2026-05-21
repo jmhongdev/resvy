@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import swaggerUi from 'swagger-ui-express';
 import { swaggerSpec } from './config/swagger';
 import { errorHandler } from './middleware/errorHandler';
@@ -12,25 +13,67 @@ import statsRoute from './routes/statsRoute';
 
 const app = express();
 
-// Security headers
+// Security headers. Helmet sets safe defaults for
+// X-Frame-Options, X-XSS-Protection
 app.use(helmet());
 
-// Allow cross-origin requests from the React frontend
-app.use(cors());
+// Restrict CORS to the frontend domain only
+// prevents other websites from making requests to the API
+app.use(cors({
+  origin:      process.env.CORS_ORIGIN || 'http://localhost:5173',
+  credentials: true,
+}));
 
-// Parse incoming JSON request bodies
-app.use(express.json());
+// Limit request body size. This prevents payload flooding attacks
+app.use(express.json({ limit: '10kb' }));
 
-// API documentation hosted at /api/docs
+// Rate limiters
+
+// Strict limiter for auth endpoints to prevent brute force attacks
+// Max 10 requests per IP per 15 minutes
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max:      10,
+  message:  {
+    success: false,
+    message: 'Too many attempts, please try again later',
+  },
+  standardHeaders: true,  // Return rate limit info in headers
+  legacyHeaders:   false,
+});
+
+// General limiter for all other routes
+// Max 100 requests per IP per 15 minutes
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max:      100,
+  message:  {
+    success: false,
+    message: 'Too many requests, please slow down',
+  },
+  standardHeaders: true,
+  legacyHeaders:   false,
+});
+
+// Apply general limiter to all routes
+app.use(generalLimiter);
+
+// Apply strict limiter to auth routes
+// Must be before app.use('/auth', authRoute)
+app.use('/auth/login',    authLimiter);
+app.use('/auth/register', authLimiter);
+
+// API documentation
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
-app.use('/health', healthRoute);
-app.use('/auth', authRoute);
+// Routes
+app.use('/health',    healthRoute);
+app.use('/auth',      authRoute);
 app.use('/amenities', amenityRoute);
-app.use('/bookings', bookingRoute);
-app.use('/stats',    statsRoute);
+app.use('/bookings',  bookingRoute);
+app.use('/stats',     statsRoute);
 
-// 404 handler — catches any route that doesn't match above
+// 404 handler
 app.use((req, res) => {
   res.status(404).json({
     success: false,
@@ -38,7 +81,7 @@ app.use((req, res) => {
   });
 });
 
-// Global error handler
+// Global error handler — must be last
 app.use(errorHandler);
 
 export default app;
