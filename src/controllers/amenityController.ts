@@ -56,7 +56,27 @@ export async function getAmenities(
 ): Promise<void> {
   try {
     const buildingId = req.user!.buildingId;
-    const amenities  = await amenityService.getAmenitiesByBuilding(buildingId);
+
+    // Parse query params
+    const filters: amenityService.AmenityFilters = {};
+
+    if (typeof req.query.search === 'string') {
+      filters.search = req.query.search;
+    }
+    if (typeof req.query.min_capacity === 'string') {
+      filters.min_capacity = Number(req.query.min_capacity);
+    }
+    if (typeof req.query.location === 'string') {
+      filters.location = req.query.location;
+    }
+    if (req.query.available_today === 'true') {
+      filters.available_today = true;
+    }
+
+    const amenities = await amenityService.getAmenitiesByBuilding(
+      buildingId,
+      filters
+    );
 
     res.status(200).json({ success: true, data: amenities });
   } catch (error: unknown) {

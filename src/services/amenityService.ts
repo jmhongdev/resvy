@@ -84,17 +84,115 @@ export async function createAmenity(
   return result.rows[0];
 }
 
-export async function getAmenitiesByBuilding(buildingId: string) {
+export interface AmenityFilters {
+  search?:       string;
+  min_capacity?: number;
+  location?:     string;
+  available_today?: boolean;
+}
+
+export async function getAmenitiesByBuilding(
+  buildingId: string,
+  filters:    AmenityFilters = {}
+) {
+  const conditions: string[] = ['building_id = $1', 'is_active = true'];
+  const values:     unknown[] = [buildingId];
+  let   paramIndex = 2;
+
+  // Search by name or description
+  if (filters.search) {
+    conditions.push(
+      `(name ILIKE $${paramIndex} OR description ILIKE $${paramIndex})`
+    );
+    values.push(`%${filters.search}%`);
+    paramIndex++;
+  }
+
+  // Filter by minimum capacity
+  if (filters.min_capacity) {
+    conditions.push(`capacity >= $${paramIndex}`);
+    values.push(filters.min_capacity);
+    paramIndex++;
+  }
+
+  // Filter by location
+  if (filters.location) {
+    conditions.push(`location ILIKE $${paramIndex}`);
+    values.push(`%${filters.location}%`);
+    paramIndex++;
+  }
+
+  const whereClause = conditions.join(' AND ');
+
   const result = await pool.query(
     `SELECT
        id, name, description, capacity, location,
        is_active, open_time, close_time,
        slot_duration_mins, max_advance_days
      FROM amenities
-     WHERE building_id = $1
+     WHERE ${whereClause}
      ORDER BY name ASC`,
-    [buildingId]
+    values
   );
+
+  // Filter by availability today in application layer
+  if (filters.available_today) {
+    const today = new Date().toISOString().split('T')[0];
+
+    const amenityIds = result.rows.map(a => a.id);
+
+    if (amenityIds.length === 0) return [];
+
+    // Get all bookings for today for these amenities
+    const bookingsResult = await pool.query(
+      `SELECT amenity_id, start_time, end_time
+       FROM bookings
+       WHERE amenity_id = ANY($1::uuid[])
+         AND booking_date = $2
+         AND status != 'cancelled'`,
+      [amenityIds, today]
+    );
+
+    const bookedByAmenity: Record<string, { start_time: string; end_time: string }[]> = {};
+
+    bookingsResult.rows.forEach(b => {
+      if (!bookedByAmenity[b.amenity_id]) {
+        bookedByAmenity[b.amenity_id] = [];
+      }
+      bookedByAmenity[b.amenity_id].push(b);
+    });
+
+    // Keep only amenities that have at least one available slot today
+    return result.rows.filter(amenity => {
+      const bookings = bookedByAmenity[amenity.id] ?? [];
+
+      // Generate slots for this amenity
+      const [oh, om] = amenity.open_time.split(':').map(Number);
+      const [ch, cm] = amenity.close_time.split(':').map(Number);
+      const openMins  = oh * 60 + om;
+      const closeMins = ch * 60 + cm;
+
+      for (
+        let current = openMins;
+        current + amenity.slot_duration_mins <= closeMins;
+        current += amenity.slot_duration_mins
+      ) {
+        const slotEnd = current + amenity.slot_duration_mins;
+
+        const isBooked = bookings.some(b => {
+          const [bsh, bsm] = b.start_time.slice(0, 5).split(':').map(Number);
+          const [beh, bem] = b.end_time.slice(0, 5).split(':').map(Number);
+          const bStart = bsh * 60 + bsm;
+          const bEnd   = beh * 60 + bem;
+          return bStart < slotEnd && bEnd > current;
+        });
+
+        if (!isBooked) return true;
+      }
+
+      return false;
+    });
+  }
 
   return result.rows;
 }

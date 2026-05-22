@@ -25,8 +25,28 @@ export interface AvailabilityResult {
   slots:      TimeSlot[];
 }
 
-export async function getAmenities(): Promise<Amenity[]> {
-  return apiClient.get<Amenity[]>('/amenities');
+export interface AmenityFilters {
+  search?:          string;
+  min_capacity?:    number;
+  location?:        string;
+  available_today?: boolean;
+}
+
+export async function getAmenities(
+  filters: AmenityFilters = {}
+): Promise<Amenity[]> {
+  // Build query string from filters
+  const params = new URLSearchParams();
+
+  if (filters.search)          params.set('search',          filters.search);
+  if (filters.min_capacity)    params.set('min_capacity',    String(filters.min_capacity));
+  if (filters.location)        params.set('location',        filters.location);
+  if (filters.available_today) params.set('available_today', 'true');
+
+  const query = params.toString();
+  const url   = query ? `/amenities?${query}` : '/amenities';
+
+  return apiClient.get<Amenity[]>(url);
 }
 
 export async function getAmenity(id: string): Promise<Amenity> {
