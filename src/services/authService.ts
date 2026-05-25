@@ -92,27 +92,68 @@ export async function login(input: LoginInput) {
 
   // 1. Find user by email
   const result = await pool.query(
-    `SELECT id, name, email, password_hash, role, building_id
+    `SELECT id, name, email, password_hash, role, building_id,
+            failed_login_attempts, locked_until
      FROM users
      WHERE email = $1`,
     [email]
   );
 
   if (result.rows.length === 0) {
-    // Use a generic error message
+    // Use generic error so that it doesn't reveal whether email exists
     throw new Error('INVALID_CREDENTIALS');
   }
 
   const user = result.rows[0];
 
-  // 2. Compare password against stored hash
+  // 2. Check if account is locked
+  if (user.locked_until && new Date(user.locked_until) > new Date()) {
+    const minutesLeft = Math.ceil(
+      (new Date(user.locked_until).getTime() - Date.now()) / 1000 / 60
+    );
+    throw new Error(`ACCOUNT_LOCKED:${minutesLeft}`);
+  }
+
+  // 3. Compare password against stored hash
   const passwordMatch = await bcrypt.compare(password, user.password_hash);
 
   if (!passwordMatch) {
-    throw new Error('INVALID_CREDENTIALS');
+    // Increment failed attempts
+    const attempts = user.failed_login_attempts + 1;
+    const maxAttempts = 5;
+
+    if (attempts >= maxAttempts) {
+      // Lock the account for 15 minutes
+      await pool.query(
+        `UPDATE users
+         SET failed_login_attempts = $1,
+             locked_until          = NOW() + INTERVAL '15 minutes'
+         WHERE id = $2`,
+        [attempts, user.id]
+      );
+      throw new Error('ACCOUNT_LOCKED:15');
+    } else {
+      // Just increment the counter
+      await pool.query(
+        `UPDATE users
+         SET failed_login_attempts = $1
+         WHERE id = $2`,
+        [attempts, user.id]
+      );
+      throw new Error(`INVALID_CREDENTIALS:${maxAttempts - attempts}`);
+    }
   }
 
-  // 3. Generate tokens
+  // 4. Successful login, reset the failed attempts counter
+  await pool.query(
+    `UPDATE users
+     SET failed_login_attempts = 0,
+         locked_until          = NULL
+     WHERE id = $1`,
+    [user.id]
+  );
+
+  // 5. Generate tokens
   const payload: JwtPayload = {
     userId:     user.id,
     buildingId: user.building_id,

@@ -41,7 +41,17 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} style={styles.form}>
           {error && (
-            <div style={styles.error}>{error}</div>
+            <div style={{
+              ...styles.error,
+              ...(error.includes('locked') ? styles.errorLocked : {}),
+            }}>
+              {error.includes('locked') && (
+                <span style={{ fontWeight: 600, display: 'block', marginBottom: '0.25rem' }}>
+                  Account locked
+                </span>
+              )}
+              {error}
+            </div>
           )}
 
           <div style={styles.field}>
@@ -173,5 +183,10 @@ const styles: Record<string, React.CSSProperties> = {
     color:          '#2563eb',
     textDecoration: 'none',
     fontWeight:     500,
+  },
+  errorLocked: {
+  background: '#fef3c7',
+  border:     '1px solid #fcd34d',
+  color:      '#92400e',
   },
 };

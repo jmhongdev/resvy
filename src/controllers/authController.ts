@@ -96,8 +96,24 @@ export async function login(
 
     const message = getErrorMessage(error);
 
-    if (message === 'INVALID_CREDENTIALS') {
-      res.status(401).json({ success: false, message: 'Invalid email or password' });
+    if (message.startsWith('INVALID_CREDENTIALS')) {
+      // Message format: INVALID_CREDENTIALS:attemptsRemaining
+      const parts    = message.split(':');
+      const remaining = parts[1] ? ` ${parts[1]} attempt(s) remaining.` : '';
+      res.status(401).json({
+        success: false,
+        message: `Invalid email or password.${remaining}`,
+      });
+      return;
+    }
+
+    if (message.startsWith('ACCOUNT_LOCKED')) {
+      const parts   = message.split(':');
+      const minutes = parts[1] ?? '15';
+      res.status(423).json({
+        success: false,
+        message: `Account locked due to too many failed attempts. Try again in ${minutes} minute(s).`,
+      });
       return;
     }
 
