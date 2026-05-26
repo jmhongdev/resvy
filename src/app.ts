@@ -46,7 +46,7 @@ const authLimiter = rateLimit({
 // Max 100 requests per IP per 15 minutes
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max:      100,
+  max:      process.env.NODE_ENV === 'production' ? 100 : 1000,
   message:  {
     success: false,
     message: 'Too many requests, please slow down',

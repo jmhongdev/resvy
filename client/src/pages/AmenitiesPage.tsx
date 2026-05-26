@@ -3,6 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { getAmenities } from '../api/amenities';
 import type { Amenity, AmenityFilters } from '../api/amenities';
 import { useAuth } from '../context/useAuth';
+import { getTodaysBookings } from '../api/bookings';
+import type { Booking } from '../api/bookings';
+import { Link } from 'react-router-dom';
 
 export default function AmenitiesPage() {
   const navigate          = useNavigate();
@@ -10,6 +13,8 @@ export default function AmenitiesPage() {
   const [amenities,  setAmenities]  = useState<Amenity[]>([]);
   const [loading,    setLoading]    = useState(true);
   const [error,      setError]      = useState('');
+
+  const [todaysBookings, setTodaysBookings] = useState<Booking[]>([]);
 
   // Filter state
   const [search,         setSearch]         = useState('');
@@ -38,6 +43,20 @@ export default function AmenitiesPage() {
     init();
   }, [loadAmenities]);
 
+  useEffect(() => {
+  async function loadTodaysBookings() {
+    try {
+      const data = await getTodaysBookings();
+      console.log('todays bookings:', data);
+      console.log('today date:', new Date().toISOString().split('T')[0]);
+      setTodaysBookings(data);
+    } catch (err) {
+      console.log('error loading todays bookings:', err);
+    }
+  }
+  loadTodaysBookings();
+  }, []);
+
   // Apply filters
   function handleSearch() {
     const filters: AmenityFilters = {};
@@ -57,6 +76,29 @@ export default function AmenitiesPage() {
 
   return (
     <div style={styles.page}>
+      {/* Today's booking banner */}
+        {!isAdmin && todaysBookings.length > 0 && (
+          <div style={styles.banner}>
+            <div style={styles.bannerLeft}>
+              <span style={styles.bannerIcon}>📅</span>
+              <div>
+                <p style={styles.bannerTitle}>
+                  You have {todaysBookings.length} booking{todaysBookings.length > 1 ? 's' : ''} today
+                </p>
+                <div style={styles.bannerBookings}>
+                  {todaysBookings.map(b => (
+                    <span key={b.id} style={styles.bannerBookingItem}>
+                      {b.amenity_name} · {b.start_time.slice(0,5)} — {b.end_time.slice(0,5)}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <Link to="/my-bookings" style={styles.bannerLink}>
+              View all →
+            </Link>
+          </div>
+        )}
       <div style={styles.header}>
         <h1 style={styles.title}>Amenities</h1>
         <p style={styles.subtitle}>Book a shared space in your building</p>
@@ -283,5 +325,47 @@ const styles: Record<string, React.CSSProperties> = {
     padding:   '3rem',
     textAlign: 'center',
     color:     '#666',
+  },
+  banner: {
+  background:     '#eff6ff',
+  border:         '1px solid #bfdbfe',
+  borderRadius:   '12px',
+  padding:        '1rem 1.25rem',
+  marginBottom:   '1.5rem',
+  display:        'flex',
+  alignItems:     'center',
+  justifyContent: 'space-between',
+  gap:            '1rem',
+  },
+  bannerLeft: {
+    display:    'flex',
+    alignItems: 'flex-start',
+    gap:        '0.75rem',
+  },
+  bannerIcon: {
+    fontSize:  '1.25rem',
+    flexShrink: 0,
+  },
+  bannerTitle: {
+    fontWeight:   600,
+    fontSize:     '0.9rem',
+    color:        '#1e40af',
+    marginBottom: '0.25rem',
+  },
+  bannerBookings: {
+    display:       'flex',
+    flexDirection: 'column',
+    gap:           '0.2rem',
+  },
+  bannerBookingItem: {
+    fontSize: '0.8rem',
+    color:    '#3b82f6',
+  },
+  bannerLink: {
+    color:          '#2563eb',
+    textDecoration: 'none',
+    fontSize:       '0.875rem',
+    fontWeight:     500,
+    whiteSpace:     'nowrap',
   },
 };
