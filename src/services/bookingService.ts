@@ -42,19 +42,23 @@ export async function createBooking(
       throw new Error('AMENITY_NOT_ACTIVE');
     }
 
-    // 2. Check the booking date is not too far in advance
-    const today       = new Date();
+    // 2. Check the booking is not in the past
+    const today = new Date();
     const bookingDate = new Date(booking_date);
-    const daysDiff    = Math.ceil(
+    const daysDiff = Math.ceil(
       (bookingDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
     );
 
-    if (daysDiff > amenity.max_advance_days) {
-      throw new Error('TOO_FAR_IN_ADVANCE');
+    // Check the full datetime — not just the date
+    // This prevents booking a slot earlier today that has already passed
+    const bookingEndDateTime = new Date(`${booking_date}T${end_time}:00`);
+
+    if (bookingEndDateTime < today) {
+      throw new Error('PAST_SLOT');
     }
 
-    if (daysDiff < 0) {
-      throw new Error('PAST_DATE');
+    if (daysDiff > amenity.max_advance_days) {
+      throw new Error('TOO_FAR_IN_ADVANCE');
     }
 
     // 3. Check for conflicting bookings

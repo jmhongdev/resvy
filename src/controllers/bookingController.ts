@@ -66,6 +66,10 @@ export async function createBooking(
       res.status(400).json({ success: false, message: 'Cannot book a past date' });
       return;
     }
+    if (message === 'PAST_SLOT') {
+    res.status(400).json({ success: false, message: 'Cannot book a time slot that has already passed' });
+    return;
+}
     next(error);
   }
 }

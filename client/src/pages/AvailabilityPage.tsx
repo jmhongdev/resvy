@@ -107,22 +107,30 @@ export default function AvailabilityPage() {
             Available slots for {date}
           </p>
           <div style={styles.slotsGrid}>
-            {slots.map(slot => (
-              <button
-                key={slot.start_time}
-                onClick={() => slot.available && setSelectedSlot(slot)}
-                style={{
-                  ...styles.slot,
-                  ...(slot.available ? {} : styles.slotTaken),
-                  ...(selectedSlot?.start_time === slot.start_time
-                    ? styles.slotSelected
-                    : {}),
-                }}
-                disabled={!slot.available}
-              >
-                {slot.start_time.slice(0, 5)}
-              </button>
-            ))}
+            {slots.map(slot => {
+              // Check if this slot has already passed for today's date
+              const slotEndDateTime = new Date(`${date}T${slot.end_time}:00`);
+              const isPast          = slotEndDateTime < new Date();
+              const isUnavailable   = !slot.available || isPast;
+
+              return (
+                <button
+                  key={slot.start_time}
+                  onClick={() => !isUnavailable && setSelectedSlot(slot)}
+                  style={{
+                    ...styles.slot,
+                    ...(isUnavailable ? styles.slotTaken : {}),
+                    ...(selectedSlot?.start_time === slot.start_time
+                      ? styles.slotSelected
+                      : {}),
+                  }}
+                  disabled={isUnavailable}
+                  title={isPast ? 'This slot has already passed' : ''}
+                >
+                  {slot.start_time.slice(0, 5)}
+                </button>
+              );
+            })}
           </div>
 
           {selectedSlot && (
