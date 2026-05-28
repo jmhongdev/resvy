@@ -54,3 +54,32 @@ export async function getTodaysBookings(): Promise<Booking[]> {
     return bookingDate === todayStr && b.status === 'confirmed';
   });
 }
+export interface AdminBooking {
+  id:               string;
+  booking_date:     string;
+  start_time:       string;
+  end_time:         string;
+  status:           string;
+  notes?:           string;
+  amenity_name:     string;
+  amenity_location: string;
+  resident_name:    string;
+  resident_email:   string;
+  created_at:       string;
+}
+
+export async function getAdminBookings(filters: {
+  amenity_id?: string;
+  date?:       string;
+  status?:     string;
+} = {}): Promise<AdminBooking[]> {
+  const params = new URLSearchParams();
+  if (filters.amenity_id) params.set('amenity_id', filters.amenity_id);
+  if (filters.date)       params.set('date',       filters.date);
+  if (filters.status)     params.set('status',     filters.status);
+
+  const query = params.toString();
+  const url   = query ? `/bookings/admin?${query}` : '/bookings/admin';
+
+  return apiClient.get<AdminBooking[]>(url);
+}
