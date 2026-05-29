@@ -18,7 +18,10 @@ export default function Navbar() {
         <Link to="/"            style={styles.link}>Amenities</Link>
         <Link to="/my-bookings" style={styles.link}>My Bookings</Link>
         {isAdmin && (
-          <Link to="/admin" style={styles.link}>Admin</Link>
+          <>
+            <Link to="/admin"          style={styles.link}>Dashboard</Link>
+            <Link to="/admin/bookings" style={styles.link}>Bookings</Link>
+          </>
         )}
       </div>
 

@@ -1,13 +1,14 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/useAuth';
-import ProtectedRoute from './components/protectedRoute';
-import Navbar from './components/Navbar';
+import ProtectedRoute from './components/ProtectedRoute';
+import Navbar from './components/NavBar';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import AmenitiesPage from './pages/AmenitiesPage';
 import AvailabilityPage from './pages/AvailabilityPage';
 import MyBookingsPage from './pages/MyBookingsPage';
 import AdminDashboardPage from './pages/AdminDashboardPage';
+import AdminBookingsPage from './pages/AdminBookingsPage';
 
 function App() {
   const { user } = useAuth();
@@ -45,6 +46,12 @@ function App() {
         <Route path="/admin" element={
           <ProtectedRoute requireAdmin>
             <AdminDashboardPage />
+          </ProtectedRoute>
+        } />
+
+        <Route path="/admin/bookings" element={
+          <ProtectedRoute requireAdmin>
+            <AdminBookingsPage />
           </ProtectedRoute>
         } />
 
