@@ -10,6 +10,7 @@ import authRoute from './routes/authRoute';
 import amenityRoute from './routes/amenityRoute';
 import bookingRoute from './routes/bookingRoute';
 import statsRoute from './routes/statsRoute';
+import userRoute from './routes/userRoute';
 
 const app = express();
 
@@ -72,6 +73,7 @@ app.use('/auth',      authRoute);
 app.use('/amenities', amenityRoute);
 app.use('/bookings',  bookingRoute);
 app.use('/stats',     statsRoute);
+app.use('/users', userRoute);
 
 // 404 handler
 app.use((req, res) => {
