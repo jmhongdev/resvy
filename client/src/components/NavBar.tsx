@@ -26,7 +26,7 @@ export default function Navbar() {
       </div>
 
       <div style={styles.right}>
-        <span style={styles.userName}>{user?.name}</span>
+        <Link to="/profile" style={styles.link}>{user?.name}</Link>
         <button onClick={handleLogout} style={styles.logoutBtn}>
           Sign out
         </button>

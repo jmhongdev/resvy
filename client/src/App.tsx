@@ -9,6 +9,7 @@ import AvailabilityPage from './pages/AvailabilityPage';
 import MyBookingsPage from './pages/MyBookingsPage';
 import AdminDashboardPage from './pages/AdminDashboardPage';
 import AdminBookingsPage from './pages/AdminBookingsPage';
+import ProfilePage from './pages/ProfilePage';
 
 function App() {
   const { user } = useAuth();
@@ -52,6 +53,12 @@ function App() {
         <Route path="/admin/bookings" element={
           <ProtectedRoute requireAdmin>
             <AdminBookingsPage />
+          </ProtectedRoute>
+        } />
+
+        <Route path="/profile" element={
+          <ProtectedRoute>
+            <ProfilePage />
           </ProtectedRoute>
         } />
 
