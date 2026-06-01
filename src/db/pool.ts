@@ -1,7 +1,14 @@
 import { Pool } from 'pg';
-import dotenv from 'dotenv';
 
-dotenv.config();
+// Validate required environment variables at startup.
+// Fail fast with a clear message rather than a cryptic connection error.
+const required = ['DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD'] as const;
+
+for (const key of required) {
+  if (!process.env[key]) {
+    throw new Error(`Missing required environment variable: ${key}`);
+  }
+}
 
 export const pool = new Pool({
   host:     process.env.DB_HOST,
@@ -9,13 +16,15 @@ export const pool = new Pool({
   database: process.env.DB_NAME,
   user:     process.env.DB_USER,
   password: process.env.DB_PASSWORD,
+
+  // Connection pool limits — important for production
+  max:                    10,
+  idleTimeoutMillis:      30000,
+  connectionTimeoutMillis: 2000,
 });
 
-pool.on('connect', () => {
-  console.log('Connected to PostgreSQL');
-});
-
+// Log unexpected client errors but don't crash the server
+// The pool handles reconnection automatically
 pool.on('error', (err) => {
-  console.error('PostgreSQL pool error:', err);
-  process.exit(1);
+  console.error('Unexpected PostgreSQL client error:', err);
 });
