@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
 import swaggerUi from 'swagger-ui-express';
 import { swaggerSpec } from './config/swagger';
@@ -14,68 +15,70 @@ import userRoute from './routes/userRoute';
 
 const app = express();
 
-// Security headers. Helmet sets safe defaults for
-// X-Frame-Options, X-XSS-Protection
+// Security middleware
+
+// Security headers
 app.use(helmet());
 
-// Restrict CORS to the frontend domain only
-// prevents other websites from making requests to the API
+// Validate CORS origin at startup
+const corsOrigin = process.env.CORS_ORIGIN;
+if (!corsOrigin) {
+  throw new Error('Missing required environment variable: CORS_ORIGIN');
+}
+
 app.use(cors({
-  origin:      process.env.CORS_ORIGIN || 'http://localhost:5173',
+  origin:      corsOrigin,
   credentials: true,
 }));
 
-// Limit request body size. This prevents payload flooding attacks
+// Limit request body size — prevents payload flooding
 app.use(express.json({ limit: '10kb' }));
 
-// Rate limiters
+// Request logging
 
-// Strict limiter for auth endpoints to prevent brute force attacks
-// Max 10 requests per IP per 15 minutes
+app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+
+// Rate limiting
+
+// Strict limiter for auth endpoints — prevents brute force
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max:      10,
-  message:  {
-    success: false,
-    message: 'Too many attempts, please try again later',
-  },
-  standardHeaders: true,  // Return rate limit info in headers
-  legacyHeaders:   false,
-});
-
-// General limiter for all other routes
-// Max 100 requests per IP per 15 minutes
-const generalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max:      process.env.NODE_ENV === 'production' ? 100 : 1000,
-  message:  {
-    success: false,
-    message: 'Too many requests, please slow down',
-  },
+  windowMs:        15 * 60 * 1000,
+  max:             10,
+  message:         { success: false, message: 'Too many attempts, please try again later' },
   standardHeaders: true,
   legacyHeaders:   false,
 });
 
-// Apply general limiter to all routes
-app.use(generalLimiter);
+// General limiter — relaxed in development
+const generalLimiter = rateLimit({
+  windowMs:        15 * 60 * 1000,
+  max:             process.env.NODE_ENV === 'production' ? 100 : 1000,
+  message:         { success: false, message: 'Too many requests, please slow down' },
+  standardHeaders: true,
+  legacyHeaders:   false,
+});
 
-// Apply strict limiter to auth routes
-// Must be before app.use('/auth', authRoute)
+app.use(generalLimiter);
 app.use('/auth/login',    authLimiter);
 app.use('/auth/register', authLimiter);
 
-// API documentation
-app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+// API documentation (development only)
+
+if (process.env.NODE_ENV !== 'production') {
+  app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+}
 
 // Routes
+
 app.use('/health',    healthRoute);
 app.use('/auth',      authRoute);
 app.use('/amenities', amenityRoute);
 app.use('/bookings',  bookingRoute);
 app.use('/stats',     statsRoute);
-app.use('/users', userRoute);
+app.use('/users',     userRoute);
 
-// 404 handler
+// Error handling
+
 app.use((req, res) => {
   res.status(404).json({
     success: false,
@@ -83,7 +86,6 @@ app.use((req, res) => {
   });
 });
 
-// Global error handler — must be last
 app.use(errorHandler);
 
 export default app;

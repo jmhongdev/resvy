@@ -17,13 +17,13 @@ export const pool = new Pool({
   user:     process.env.DB_USER,
   password: process.env.DB_PASSWORD,
 
-  // Connection pool limits — important for production
+  // Connection pool limits
   max:                    10,
   idleTimeoutMillis:      30000,
   connectionTimeoutMillis: 2000,
 });
 
-// Log unexpected client errors but don't crash the server
+// Log unexpected client errors
 // The pool handles reconnection automatically
 pool.on('error', (err) => {
   console.error('Unexpected PostgreSQL client error:', err);
