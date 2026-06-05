@@ -1,27 +1,45 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { pool } from '../db/pool';
-import { RegisterInput, LoginInput, JwtPayload } from '../types/auth';
+import type { RegisterInput, LoginInput, JwtPayload } from '../types/auth';
 
-// How many times bcrypt hashes the password.
-const SALT_ROUNDS = 12;
+//Constants
 
-// Access token expires quickly
+const SALT_ROUNDS        = 12;
 const ACCESS_TOKEN_EXPIRY  = '15m';
-
-// Refresh token lives longer
 const REFRESH_TOKEN_EXPIRY = '7d';
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOCKOUT_MINUTES    = 15;
 
-// Token helpers
+// Custom error class
+
+export class AuthError extends Error {
+  constructor(
+    public code:    string,
+    message:        string,
+    public data?:   Record<string, unknown>
+  ) {
+    super(message);
+    this.name = 'AuthError';
+  }
+}
+
+// Helpers
+
+function getSecret(key: 'JWT_SECRET' | 'JWT_REFRESH_SECRET'): string {
+  const secret = process.env[key];
+  if (!secret) throw new Error(`Missing required environment variable: ${key}`);
+  return secret;
+}
 
 export function generateAccessToken(payload: JwtPayload): string {
-  return jwt.sign(payload, process.env.JWT_SECRET as string, {
+  return jwt.sign(payload, getSecret('JWT_SECRET'), {
     expiresIn: ACCESS_TOKEN_EXPIRY,
   });
 }
 
 export function generateRefreshToken(payload: JwtPayload): string {
-  return jwt.sign(payload, process.env.JWT_REFRESH_SECRET as string, {
+  return jwt.sign(payload, getSecret('JWT_REFRESH_SECRET'), {
     expiresIn: REFRESH_TOKEN_EXPIRY,
   });
 }
@@ -31,58 +49,71 @@ export function generateRefreshToken(payload: JwtPayload): string {
 export async function register(input: RegisterInput) {
   const { name, email, password, building_code } = input;
 
-  // 1. Find the building by code
-  const buildingResult = await pool.query(
-    `SELECT id FROM buildings WHERE invite_code = $1`,
-    [building_code]
-  );
+  const client = await pool.connect();
 
-  if (buildingResult.rows.length === 0) {
-    throw new Error('INVALID_BUILDING_CODE');
+  try {
+    await client.query('BEGIN');
+
+    // 1. Find the building by code
+    const buildingResult = await client.query(
+      `SELECT id FROM buildings WHERE invite_code = $1`,
+      [building_code]
+    );
+
+    if (buildingResult.rows.length === 0) {
+      throw new AuthError('INVALID_BUILDING_CODE', 'Building code not found');
+    }
+
+    const buildingId = buildingResult.rows[0].id;
+
+    // 2. Hash the password
+    const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+
+    // 3. Insert the user
+    let userResult;
+    try {
+      userResult = await client.query(
+        `INSERT INTO users (building_id, name, email, password_hash, role)
+         VALUES ($1, $2, $3, $4, 'resident')
+         RETURNING id, name, email, role, building_id`,
+        [buildingId, name, email, passwordHash]
+      );
+    } catch (err: unknown) {
+      if (
+        typeof err === 'object' && err !== null && 'code' in err &&
+        (err as { code: string }).code === '23505'
+      ) {
+        throw new AuthError('EMAIL_ALREADY_EXISTS', 'Email already registered');
+      }
+      throw err;
+    }
+
+    await client.query('COMMIT');
+
+    const user = userResult.rows[0];
+
+    const payload: JwtPayload = {
+      userId:     user.id,
+      buildingId: user.building_id,
+      role:       user.role,
+    };
+
+    return {
+      user: {
+        id:    user.id,
+        name:  user.name,
+        email: user.email,
+        role:  user.role,
+      },
+      accessToken:  generateAccessToken(payload),
+      refreshToken: generateRefreshToken(payload),
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
   }
-
-  const buildingId = buildingResult.rows[0].id;
-
-  // 2. Check if email is already registered
-  const existingUser = await pool.query(
-    `SELECT id FROM users WHERE email = $1`,
-    [email]
-  );
-
-  if (existingUser.rows.length > 0) {
-    throw new Error('EMAIL_ALREADY_EXISTS');
-  }
-
-  // 3. Hash the password
-  const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-
-  // 4. Insert the new user
-  const userResult = await pool.query(
-    `INSERT INTO users (building_id, name, email, password_hash, role)
-     VALUES ($1, $2, $3, $4, 'resident')
-     RETURNING id, name, email, role, building_id`,
-    [buildingId, name, email, passwordHash]
-  );
-
-  const user = userResult.rows[0];
-
-  // 5. Generate tokens
-  const payload: JwtPayload = {
-    userId:     user.id,
-    buildingId: user.building_id,
-    role:       user.role,
-  };
-
-  return {
-    user: {
-      id:    user.id,
-      name:  user.name,
-      email: user.email,
-      role:  user.role,
-    },
-    accessToken:  generateAccessToken(payload),
-    refreshToken: generateRefreshToken(payload),
-  };
 }
 
 // Login
@@ -90,7 +121,6 @@ export async function register(input: RegisterInput) {
 export async function login(input: LoginInput) {
   const { email, password } = input;
 
-  // 1. Find user by email
   const result = await pool.query(
     `SELECT id, name, email, password_hash, role, building_id,
             failed_login_attempts, locked_until
@@ -100,51 +130,49 @@ export async function login(input: LoginInput) {
   );
 
   if (result.rows.length === 0) {
-    // Use generic error so that it doesn't reveal whether email exists
-    throw new Error('INVALID_CREDENTIALS');
+    // Generic error 
+    throw new AuthError('INVALID_CREDENTIALS', 'Invalid email or password');
   }
 
   const user = result.rows[0];
 
-  // 2. Check if account is locked
+  // Check if account is locked
   if (user.locked_until && new Date(user.locked_until) > new Date()) {
     const minutesLeft = Math.ceil(
       (new Date(user.locked_until).getTime() - Date.now()) / 1000 / 60
     );
-    throw new Error(`ACCOUNT_LOCKED:${minutesLeft}`);
+    throw new AuthError('ACCOUNT_LOCKED', 'Account is locked', { minutesLeft });
   }
 
-  // 3. Compare password against stored hash
   const passwordMatch = await bcrypt.compare(password, user.password_hash);
 
   if (!passwordMatch) {
-    // Increment failed attempts
     const attempts = user.failed_login_attempts + 1;
-    const maxAttempts = 5;
 
-    if (attempts >= maxAttempts) {
-      // Lock the account for 15 minutes
-      await pool.query(
-        `UPDATE users
-         SET failed_login_attempts = $1,
-             locked_until          = NOW() + INTERVAL '15 minutes'
-         WHERE id = $2`,
-        [attempts, user.id]
-      );
-      throw new Error('ACCOUNT_LOCKED:15');
-    } else {
-      // Just increment the counter
-      await pool.query(
-        `UPDATE users
-         SET failed_login_attempts = $1
-         WHERE id = $2`,
-        [attempts, user.id]
-      );
-      throw new Error(`INVALID_CREDENTIALS:${maxAttempts - attempts}`);
+    // Single query handles both locking and incrementing
+    await pool.query(
+      `UPDATE users
+       SET failed_login_attempts = $1,
+           locked_until = CASE
+             WHEN $1 >= $2 THEN NOW() + INTERVAL '15 minutes'
+             ELSE NULL
+           END
+       WHERE id = $3`,
+      [attempts, MAX_LOGIN_ATTEMPTS, user.id]
+    );
+
+    if (attempts >= MAX_LOGIN_ATTEMPTS) {
+      throw new AuthError('ACCOUNT_LOCKED', 'Account locked due to too many failed attempts', {
+        minutesLeft: LOCKOUT_MINUTES,
+      });
     }
+
+    throw new AuthError('INVALID_CREDENTIALS', 'Invalid email or password', {
+      attemptsLeft: MAX_LOGIN_ATTEMPTS - attempts,
+    });
   }
 
-  // 4. Successful login, reset the failed attempts counter
+  // Successful login , reset counter
   await pool.query(
     `UPDATE users
      SET failed_login_attempts = 0,
@@ -153,7 +181,6 @@ export async function login(input: LoginInput) {
     [user.id]
   );
 
-  // 5. Generate tokens
   const payload: JwtPayload = {
     userId:     user.id,
     buildingId: user.building_id,
@@ -176,21 +203,19 @@ export async function login(input: LoginInput) {
 
 export async function refresh(refreshToken: string) {
   try {
-    // Verify the refresh token is valid and not expired
     const payload = jwt.verify(
       refreshToken,
-      process.env.JWT_REFRESH_SECRET as string
+      getSecret('JWT_REFRESH_SECRET')
     ) as JwtPayload;
 
-    // Issue a new access token
-    const newAccessToken = generateAccessToken({
-      userId:     payload.userId,
-      buildingId: payload.buildingId,
-      role:       payload.role,
-    });
-
-    return { accessToken: newAccessToken };
+    return {
+      accessToken: generateAccessToken({
+        userId:     payload.userId,
+        buildingId: payload.buildingId,
+        role:       payload.role,
+      }),
+    };
   } catch {
-    throw new Error('INVALID_REFRESH_TOKEN');
+    throw new AuthError('INVALID_REFRESH_TOKEN', 'Invalid or expired refresh token');
   }
 }
