@@ -1,9 +1,9 @@
 import { Request, Response, NextFunction } from 'express';
-import { z } from 'zod';
-import { ZodError } from 'zod';
+import { z, ZodError } from 'zod';
 import * as authService from '../services/authService';
+import { AuthError } from '../services/authService';
 
-// Validation schemas
+// Validation schema
 
 const registerSchema = z.object({
   name:          z.string().min(2).max(100),
@@ -21,14 +21,6 @@ const refreshSchema = z.object({
   refreshToken: z.string().min(1),
 });
 
-// Helper
-
-// Converts any thrown value into a readable error message string
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return 'UNKNOWN_ERROR';
-}
-
 // Controllers
 
 export async function register(
@@ -37,7 +29,7 @@ export async function register(
   next: NextFunction
 ): Promise<void> {
   try {
-    const input = registerSchema.parse(req.body);
+    const input  = registerSchema.parse(req.body);
     const result = await authService.register(input);
 
     res.status(201).json({
@@ -55,15 +47,15 @@ export async function register(
       return;
     }
 
-    const message = getErrorMessage(error);
-
-    if (message === 'INVALID_BUILDING_CODE') {
-      res.status(404).json({ success: false, message: 'Building code not found' });
-      return;
-    }
-    if (message === 'EMAIL_ALREADY_EXISTS') {
-      res.status(409).json({ success: false, message: 'Email already registered' });
-      return;
+    if (error instanceof AuthError) {
+      if (error.code === 'INVALID_BUILDING_CODE') {
+        res.status(404).json({ success: false, message: error.message });
+        return;
+      }
+      if (error.code === 'EMAIL_ALREADY_EXISTS') {
+        res.status(409).json({ success: false, message: error.message });
+        return;
+      }
     }
 
     next(error);
@@ -76,7 +68,7 @@ export async function login(
   next: NextFunction
 ): Promise<void> {
   try {
-    const input = loginSchema.parse(req.body);
+    const input  = loginSchema.parse(req.body);
     const result = await authService.login(input);
 
     res.status(200).json({
@@ -94,27 +86,27 @@ export async function login(
       return;
     }
 
-    const message = getErrorMessage(error);
+    if (error instanceof AuthError) {
+      if (error.code === 'INVALID_CREDENTIALS') {
+        const attemptsLeft = error.data?.attemptsLeft as number | undefined;
+        const suffix = attemptsLeft !== undefined
+          ? ` ${attemptsLeft} attempt(s) remaining.`
+          : '';
+        res.status(401).json({
+          success: false,
+          message: `Invalid email or password.${suffix}`,
+        });
+        return;
+      }
 
-    if (message.startsWith('INVALID_CREDENTIALS')) {
-      // Message format: INVALID_CREDENTIALS:attemptsRemaining
-      const parts    = message.split(':');
-      const remaining = parts[1] ? ` ${parts[1]} attempt(s) remaining.` : '';
-      res.status(401).json({
-        success: false,
-        message: `Invalid email or password.${remaining}`,
-      });
-      return;
-    }
-
-    if (message.startsWith('ACCOUNT_LOCKED')) {
-      const parts   = message.split(':');
-      const minutes = parts[1] ?? '15';
-      res.status(423).json({
-        success: false,
-        message: `Account locked due to too many failed attempts. Try again in ${minutes} minute(s).`,
-      });
-      return;
+      if (error.code === 'ACCOUNT_LOCKED') {
+        const minutes = error.data?.minutesLeft ?? 15;
+        res.status(423).json({
+          success: false,
+          message: `Account locked due to too many failed attempts. Try again in ${minutes} minute(s).`,
+        });
+        return;
+      }
     }
 
     next(error);
@@ -128,7 +120,7 @@ export async function refresh(
 ): Promise<void> {
   try {
     const { refreshToken } = refreshSchema.parse(req.body);
-    const result = await authService.refresh(refreshToken);
+    const result           = await authService.refresh(refreshToken);
 
     res.status(200).json({
       success: true,
@@ -144,11 +136,11 @@ export async function refresh(
       return;
     }
 
-    const message = getErrorMessage(error);
-
-    if (message === 'INVALID_REFRESH_TOKEN') {
-      res.status(401).json({ success: false, message: 'Invalid or expired refresh token' });
-      return;
+    if (error instanceof AuthError) {
+      if (error.code === 'INVALID_REFRESH_TOKEN') {
+        res.status(401).json({ success: false, message: error.message });
+        return;
+      }
     }
 
     next(error);
