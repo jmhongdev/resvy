@@ -1,6 +1,7 @@
 import { pool } from '../db/pool';
 
-//Types
+// Types
+
 export interface CreateAmenityInput {
   name:               string;
   description?:       string;
@@ -24,38 +25,78 @@ export interface UpdateAmenityInput {
   is_active?:          boolean;
 }
 
-//Helpers
-// Generates all possible time slots for a given amenity on a given date.
+export interface AmenityFilters {
+  search?:          string;
+  min_capacity?:    number;
+  location?:        string;
+  available_today?: boolean;
+}
+
+// Custom error
+
+export class AmenityError extends Error {
+  constructor(
+    public code:    string,
+    message:        string,
+    public data?:   Record<string, unknown>
+  ) {
+    super(message);
+    this.name = 'AmenityError';
+  }
+}
+
+// Whitelist of allowed update fields
+
+const ALLOWED_UPDATE_FIELDS: (keyof UpdateAmenityInput)[] = [
+  'name', 'description', 'capacity', 'location',
+  'open_time', 'close_time', 'slot_duration_mins',
+  'max_advance_days', 'is_active',
+];
+
+// Helpers
+
+// Convert "HH:MM" or "HH:MM:SS" to minutes since midnight
+function timeToMinutes(time: string): number {
+  const [h, m] = time.slice(0, 5).split(':').map(Number);
+  return h * 60 + m;
+}
+
+// Convert minutes since midnight back to "HH:MM"
+function minutesToTime(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+// Generate all time slots between open and close times
 function generateTimeSlots(
-  openTime:        string,
-  closeTime:       string,
+  openTime:         string,
+  closeTime:        string,
   slotDurationMins: number
 ): string[] {
   const slots: string[] = [];
+  const openMinutes  = timeToMinutes(openTime);
+  const closeMinutes = timeToMinutes(closeTime);
 
-  // Parse "HH:MM" into total minutes since midnight
-  const [openHour,  openMin]  = openTime.split(':').map(Number);
-  const [closeHour, closeMin] = closeTime.split(':').map(Number);
-
-  const openMinutes  = openHour  * 60 + openMin;
-  const closeMinutes = closeHour * 60 + closeMin;
-
-  // Walk from open to close in slot-sized steps
   for (
     let current = openMinutes;
     current + slotDurationMins <= closeMinutes;
     current += slotDurationMins
   ) {
-    const hour   = Math.floor(current / 60);
-    const minute = current % 60;
-
-    // Format back to "HH:MM"
-    slots.push(
-      `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
-    );
+    slots.push(minutesToTime(current));
   }
 
   return slots;
+}
+
+// Check if two time ranges overlap
+function hasOverlap(
+  slotStart:    number,
+  slotEnd:      number,
+  bookingStart: number,
+  bookingEnd:   number
+): boolean {
+  return bookingStart < slotEnd && bookingEnd > slotStart;
 }
 
 // Service functions
@@ -66,7 +107,7 @@ export async function createAmenity(
 ) {
   const {
     name, description, capacity, location,
-    open_time, close_time, slot_duration_mins, max_advance_days
+    open_time, close_time, slot_duration_mins, max_advance_days,
   } = input;
 
   const result = await pool.query(
@@ -74,32 +115,25 @@ export async function createAmenity(
        (building_id, name, description, capacity, location,
         open_time, close_time, slot_duration_mins, max_advance_days)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-     RETURNING *`,
+     RETURNING id, building_id, name, description, capacity, location,
+               is_active, open_time, close_time, slot_duration_mins, max_advance_days`,
     [
       buildingId, name, description ?? null, capacity, location ?? null,
-      open_time, close_time, slot_duration_mins, max_advance_days
+      open_time, close_time, slot_duration_mins, max_advance_days,
     ]
   );
 
   return result.rows[0];
 }
 
-export interface AmenityFilters {
-  search?:       string;
-  min_capacity?: number;
-  location?:     string;
-  available_today?: boolean;
-}
-
 export async function getAmenitiesByBuilding(
   buildingId: string,
   filters:    AmenityFilters = {}
 ) {
-  const conditions: string[] = ['building_id = $1', 'is_active = true'];
+  const conditions: string[]  = ['building_id = $1', 'is_active = true'];
   const values:     unknown[] = [buildingId];
   let   paramIndex = 2;
 
-  // Search by name or description
   if (filters.search) {
     conditions.push(
       `(name ILIKE $${paramIndex} OR description ILIKE $${paramIndex})`
@@ -108,21 +142,17 @@ export async function getAmenitiesByBuilding(
     paramIndex++;
   }
 
-  // Filter by minimum capacity
   if (filters.min_capacity) {
     conditions.push(`capacity >= $${paramIndex}`);
     values.push(filters.min_capacity);
     paramIndex++;
   }
 
-  // Filter by location
   if (filters.location) {
     conditions.push(`location ILIKE $${paramIndex}`);
     values.push(`%${filters.location}%`);
     paramIndex++;
   }
-
-  const whereClause = conditions.join(' AND ');
 
   const result = await pool.query(
     `SELECT
@@ -130,83 +160,77 @@ export async function getAmenitiesByBuilding(
        is_active, open_time, close_time,
        slot_duration_mins, max_advance_days
      FROM amenities
-     WHERE ${whereClause}
+     WHERE ${conditions.join(' AND ')}
      ORDER BY name ASC`,
     values
   );
 
-  // Filter by availability today in application layer
-  if (filters.available_today) {
-    const today = new Date().toISOString().split('T')[0];
-
-    const amenityIds = result.rows.map(a => a.id);
-
-    if (amenityIds.length === 0) return [];
-
-    // Get all bookings for today for these amenities
-    const bookingsResult = await pool.query(
-      `SELECT amenity_id, start_time, end_time
-       FROM bookings
-       WHERE amenity_id = ANY($1::uuid[])
-         AND booking_date = $2
-         AND status != 'cancelled'`,
-      [amenityIds, today]
-    );
-
-    const bookedByAmenity: Record<string, { start_time: string; end_time: string }[]> = {};
-
-    bookingsResult.rows.forEach(b => {
-      if (!bookedByAmenity[b.amenity_id]) {
-        bookedByAmenity[b.amenity_id] = [];
-      }
-      bookedByAmenity[b.amenity_id].push(b);
-    });
-
-    // Keep only amenities that have at least one available slot today
-    return result.rows.filter(amenity => {
-      const bookings = bookedByAmenity[amenity.id] ?? [];
-
-      // Generate slots for this amenity
-      const [oh, om] = amenity.open_time.split(':').map(Number);
-      const [ch, cm] = amenity.close_time.split(':').map(Number);
-      const openMins  = oh * 60 + om;
-      const closeMins = ch * 60 + cm;
-
-      for (
-        let current = openMins;
-        current + amenity.slot_duration_mins <= closeMins;
-        current += amenity.slot_duration_mins
-      ) {
-        const slotEnd = current + amenity.slot_duration_mins;
-
-        const isBooked = bookings.some(b => {
-          const [bsh, bsm] = b.start_time.slice(0, 5).split(':').map(Number);
-          const [beh, bem] = b.end_time.slice(0, 5).split(':').map(Number);
-          const bStart = bsh * 60 + bsm;
-          const bEnd   = beh * 60 + bem;
-          return bStart < slotEnd && bEnd > current;
-        });
-
-        if (!isBooked) return true;
-      }
-
-      return false;
-    });
+  if (!filters.available_today) {
+    return result.rows;
   }
 
-  return result.rows;
+  // Filter by availability today in application layer
+  const today = new Date().toISOString().split('T')[0];
+  const amenityIds = result.rows.map(a => a.id);
+
+  if (amenityIds.length === 0) return [];
+
+  const bookingsResult = await pool.query(
+    `SELECT amenity_id, start_time, end_time
+     FROM bookings
+     WHERE amenity_id = ANY($1::uuid[])
+       AND booking_date = $2
+       AND status != 'cancelled'`,
+    [amenityIds, today]
+  );
+
+  // Group bookings by amenity
+  const bookedByAmenity: Record<string, { start_time: string; end_time: string }[]> = {};
+  for (const b of bookingsResult.rows) {
+    if (!bookedByAmenity[b.amenity_id]) bookedByAmenity[b.amenity_id] = [];
+    bookedByAmenity[b.amenity_id].push(b);
+  }
+
+  return result.rows.filter(amenity => {
+    const bookings = bookedByAmenity[amenity.id] ?? [];
+    const slots    = generateTimeSlots(
+      amenity.open_time,
+      amenity.close_time,
+      amenity.slot_duration_mins
+    );
+
+    // Return true if at least one slot has no overlapping booking
+    return slots.some(slotStart => {
+      const slotStartMins = timeToMinutes(slotStart);
+      const slotEndMins   = slotStartMins + amenity.slot_duration_mins;
+
+      return !bookings.some(b =>
+        hasOverlap(
+          slotStartMins,
+          slotEndMins,
+          timeToMinutes(b.start_time),
+          timeToMinutes(b.end_time)
+        )
+      );
+    });
+  });
 }
 
-export async function getAmenityById(amenityId: string, buildingId: string) {
+export async function getAmenityById(
+  amenityId:  string,
+  buildingId: string
+) {
   const result = await pool.query(
-    `SELECT *
+    `SELECT id, building_id, name, description, capacity, location,
+            is_active, open_time, close_time, slot_duration_mins,
+            max_advance_days, created_at
      FROM amenities
      WHERE id = $1 AND building_id = $2`,
     [amenityId, buildingId]
   );
 
   if (result.rows.length === 0) {
-    throw new Error('AMENITY_NOT_FOUND');
+    throw new AmenityError('AMENITY_NOT_FOUND', 'Amenity not found');
   }
 
   return result.rows[0];
@@ -217,14 +241,16 @@ export async function updateAmenity(
   buildingId: string,
   input:      UpdateAmenityInput
 ) {
-  // Dynamically build the SET clause from only the fields provided.
-  const fields  = Object.keys(input) as (keyof UpdateAmenityInput)[];
-  const values  = fields.map(f => input[f]);
+  // Only allow whitelisted fields to prevent SQL injection via column names
+  const fields = Object.keys(input).filter(
+    f => ALLOWED_UPDATE_FIELDS.includes(f as keyof UpdateAmenityInput)
+  ) as (keyof UpdateAmenityInput)[];
 
   if (fields.length === 0) {
-    throw new Error('NO_FIELDS_TO_UPDATE');
+    throw new AmenityError('NO_FIELDS_TO_UPDATE', 'No valid fields to update');
   }
 
+  const values     = fields.map(f => input[f]);
   const setClauses = fields
     .map((field, index) => `${field} = $${index + 1}`)
     .join(', ');
@@ -233,12 +259,13 @@ export async function updateAmenity(
     `UPDATE amenities
      SET ${setClauses}
      WHERE id = $${fields.length + 1} AND building_id = $${fields.length + 2}
-     RETURNING *`,
+     RETURNING id, building_id, name, description, capacity, location,
+               is_active, open_time, close_time, slot_duration_mins, max_advance_days`,
     [...values, amenityId, buildingId]
   );
 
   if (result.rows.length === 0) {
-    throw new Error('AMENITY_NOT_FOUND');
+    throw new AmenityError('AMENITY_NOT_FOUND', 'Amenity not found');
   }
 
   return result.rows[0];
@@ -248,17 +275,16 @@ export async function deactivateAmenity(
   amenityId:  string,
   buildingId: string
 ) {
-  // Soft delete: this part never actually deletes amenities. Just mark them inactive.
   const result = await pool.query(
     `UPDATE amenities
      SET is_active = false
      WHERE id = $1 AND building_id = $2
-     RETURNING *`,
+     RETURNING id, name, is_active`,
     [amenityId, buildingId]
   );
 
   if (result.rows.length === 0) {
-    throw new Error('AMENITY_NOT_FOUND');
+    throw new AmenityError('AMENITY_NOT_FOUND', 'Amenity not found');
   }
 
   return result.rows[0];
@@ -269,49 +295,42 @@ export async function getAvailability(
   buildingId: string,
   date:       string
 ) {
-  // 1. Get the amenity to know its schedule
   const amenity = await getAmenityById(amenityId, buildingId);
 
   if (!amenity.is_active) {
-    throw new Error('AMENITY_NOT_ACTIVE');
+    throw new AmenityError('AMENITY_NOT_ACTIVE', 'Amenity is not active');
   }
 
-  // 2. Generate all possible slots for this day
   const allSlots = generateTimeSlots(
     amenity.open_time,
     amenity.close_time,
     amenity.slot_duration_mins
   );
 
-  // 3. Find all confirmed bookings for this amenity on this date.
   const bookingsResult = await pool.query(
     `SELECT start_time, end_time
      FROM bookings
-     WHERE amenity_id  = $1
+     WHERE amenity_id   = $1
        AND booking_date = $2
-       AND status != 'cancelled'`,
+       AND status      != 'cancelled'`,
     [amenityId, date]
   );
 
   const bookedSlots = bookingsResult.rows;
 
-  // 4. For each slot, check if it overlaps with any existing booking.
-  const availability = allSlots.map(slotStart => {
-    const [sh, sm]  = slotStart.split(':').map(Number);
-    const slotStartMins = sh * 60 + sm;
+  const slots = allSlots.map(slotStart => {
+    const slotStartMins = timeToMinutes(slotStart);
     const slotEndMins   = slotStartMins + amenity.slot_duration_mins;
+    const slotEnd       = minutesToTime(slotEndMins);
 
-    const slotEnd = `${String(Math.floor(slotEndMins / 60)).padStart(2, '0')}:${String(slotEndMins % 60).padStart(2, '0')}`;
-
-    const isBooked = bookedSlots.some(booking => {
-      const [bsh, bsm] = booking.start_time.slice(0, 5).split(':').map(Number);
-      const [beh, bem] = booking.end_time.slice(0, 5).split(':').map(Number);
-      const bookingStartMins = bsh * 60 + bsm;
-      const bookingEndMins   = beh * 60 + bem;
-
-      // Overlap if booking starts before slot ends AND booking ends after slot starts
-      return bookingStartMins < slotEndMins && bookingEndMins > slotStartMins;
-    });
+    const isBooked = bookedSlots.some(booking =>
+      hasOverlap(
+        slotStartMins,
+        slotEndMins,
+        timeToMinutes(booking.start_time),
+        timeToMinutes(booking.end_time)
+      )
+    );
 
     return {
       start_time: slotStart,
@@ -320,9 +339,5 @@ export async function getAvailability(
     };
   });
 
-  return {
-    amenity_id:   amenityId,
-    date,
-    slots: availability,
-  };
+  return { amenity_id: amenityId, date, slots };
 }
