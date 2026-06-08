@@ -9,6 +9,25 @@ export interface CreateBookingInput {
   notes?:       string;
 }
 
+export interface AdminBookingFilters {
+  amenity_id?: string;
+  date?:       string;
+  status?:     string;
+}
+
+// Custom error
+
+export class BookingError extends Error {
+  constructor(
+    public code:    string,
+    message:        string,
+    public data?:   Record<string, unknown>
+  ) {
+    super(message);
+    this.name = 'BookingError';
+  }
+}
+
 // Service functions
 export async function createBooking(
   userId:     string,
@@ -17,8 +36,6 @@ export async function createBooking(
 ) {
   const { amenity_id, booking_date, start_time, end_time, notes } = input;
 
-  // Use a client from the pool to run a transaction.
-  // Prevents double bookings.
   const client = await pool.connect();
 
   try {
@@ -33,49 +50,52 @@ export async function createBooking(
     );
 
     if (amenityResult.rows.length === 0) {
-      throw new Error('AMENITY_NOT_FOUND');
+      throw new BookingError('AMENITY_NOT_FOUND', 'Amenity not found');
     }
 
     const amenity = amenityResult.rows[0];
 
     if (!amenity.is_active) {
-      throw new Error('AMENITY_NOT_ACTIVE');
+      throw new BookingError('AMENITY_NOT_ACTIVE', 'Amenity is not active');
     }
 
     // 2. Check the booking is not in the past
-    const today = new Date();
-    const bookingDate = new Date(booking_date);
-    const daysDiff = Math.ceil(
-      (bookingDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
-    );
-
-    // Check the full datetime — not just the date
-    // This prevents booking a slot earlier today that has already passed
+    // Compare full datetime to prevent booking same-day past slots
+    const now                = new Date();
     const bookingEndDateTime = new Date(`${booking_date}T${end_time}:00`);
 
-    if (bookingEndDateTime < today) {
-      throw new Error('PAST_SLOT');
+    if (bookingEndDateTime < now) {
+      throw new BookingError('PAST_SLOT', 'Cannot book a time slot that has already passed');
     }
+
+    // Check not too far in advance using date strings to avoid timezone issues
+    const todayStr   = now.toISOString().split('T')[0];
+    const todayDate  = new Date(todayStr);
+    const bookingDay = new Date(booking_date);
+    const daysDiff   = Math.round(
+      (bookingDay.getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24)
+    );
 
     if (daysDiff > amenity.max_advance_days) {
-      throw new Error('TOO_FAR_IN_ADVANCE');
+      throw new BookingError('TOO_FAR_IN_ADVANCE', 'Booking too far in advance', {
+        maxDays: amenity.max_advance_days,
+      });
     }
 
-    // 3. Check for conflicting bookings
-    // Two bookings overlap if one starts before the other ends AND ends after the other starts.
+    // 3. Check for conflicting bookings with row lock to prevent race conditions
     const conflictResult = await client.query(
       `SELECT id FROM bookings
-       WHERE amenity_id    = $1
-         AND booking_date  = $2
-         AND status       != 'cancelled'
-         AND start_time    < $3
-         AND end_time      > $4
+       WHERE amenity_id   = $1
+         AND booking_date = $2
+         AND status      != 'cancelled'
+         AND start_time   < $3
+         AND end_time     > $4
        FOR UPDATE`,
       [amenity_id, booking_date, end_time, start_time]
     );
 
     if (conflictResult.rows.length > 0) {
-      throw new Error('SLOT_ALREADY_BOOKED');
+      throw new BookingError('SLOT_ALREADY_BOOKED', 'This slot is already booked');
     }
 
     // 4. Check user doesn't already have a booking for this amenity on this date
@@ -89,7 +109,7 @@ export async function createBooking(
     );
 
     if (userConflict.rows.length > 0) {
-      throw new Error('USER_ALREADY_BOOKED');
+      throw new BookingError('USER_ALREADY_BOOKED', 'You already have a booking for this amenity on this date');
     }
 
     // 5. Insert the booking
@@ -97,7 +117,11 @@ export async function createBooking(
       `INSERT INTO bookings
          (user_id, amenity_id, booking_date, start_time, end_time, notes)
        VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING *`,
+       RETURNING id, user_id, amenity_id,
+                 TO_CHAR(booking_date, 'YYYY-MM-DD') AS booking_date,
+                 TO_CHAR(start_time,   'HH24:MI')    AS start_time,
+                 TO_CHAR(end_time,     'HH24:MI')    AS end_time,
+                 status, notes, created_at`,
       [userId, amenity_id, booking_date, start_time, end_time, notes ?? null]
     );
 
@@ -114,24 +138,20 @@ export async function createBooking(
 
     return booking;
   } catch (error) {
-    // If anything went wrong, roll back changes
     await client.query('ROLLBACK');
     throw error;
   } finally {
-    // Always release the client back to the pool
     client.release();
   }
 }
 
 export async function getMyBookings(userId: string) {
-  // Join bookings with amenities to get amenity name and location.
-  // Split into upcoming and past bookings using booking_date comparison.
   const result = await pool.query(
     `SELECT
        b.id,
-       b.booking_date,
-       b.start_time,
-       b.end_time,
+       TO_CHAR(b.booking_date, 'YYYY-MM-DD') AS booking_date,
+       TO_CHAR(b.start_time,   'HH24:MI')    AS start_time,
+       TO_CHAR(b.end_time,     'HH24:MI')    AS end_time,
        b.status,
        b.notes,
        b.created_at,
@@ -148,7 +168,6 @@ export async function getMyBookings(userId: string) {
     [userId]
   );
 
-  // Separate into upcoming and past
   const upcoming = result.rows.filter(b => b.period === 'upcoming');
   const past     = result.rows.filter(b => b.period === 'past');
 
@@ -166,7 +185,7 @@ export async function cancelBooking(
   try {
     await client.query('BEGIN');
 
-    // 1. Find the booking and verify ownership
+    // 1. Find the booking and verify it belongs to this building
     const bookingResult = await client.query(
       `SELECT b.id, b.status, b.booking_date, b.user_id
        FROM bookings b
@@ -176,20 +195,20 @@ export async function cancelBooking(
     );
 
     if (bookingResult.rows.length === 0) {
-      throw new Error('BOOKING_NOT_FOUND');
+      throw new BookingError('BOOKING_NOT_FOUND', 'Booking not found');
     }
 
     const booking = bookingResult.rows[0];
 
     // 2. Admins can cancel any booking in their building
-    // Residents can only cancel their own
+    //    Residents can only cancel their own booking
     if (userRole !== 'admin' && booking.user_id !== userId) {
-      throw new Error('UNAUTHORIZED');
+      throw new BookingError('UNAUTHORIZED', 'You can only cancel your own bookings');
     }
 
     // 3. Can't cancel an already cancelled booking
     if (booking.status === 'cancelled') {
-      throw new Error('ALREADY_CANCELLED');
+      throw new BookingError('ALREADY_CANCELLED', 'Booking is already cancelled');
     }
 
     // 4. Can't cancel a past booking
@@ -198,15 +217,18 @@ export async function cancelBooking(
     today.setHours(0, 0, 0, 0);
 
     if (bookingDate < today) {
-      throw new Error('PAST_BOOKING');
+      throw new BookingError('PAST_BOOKING', 'Cannot cancel a past booking');
     }
 
-    // 5. Update status to cancelled
+    // 5. Update status
     const updated = await client.query(
       `UPDATE bookings
        SET status = 'cancelled'
        WHERE id = $1
-       RETURNING *`,
+       RETURNING id, status,
+                 TO_CHAR(booking_date, 'YYYY-MM-DD') AS booking_date,
+                 TO_CHAR(start_time,   'HH24:MI')    AS start_time,
+                 TO_CHAR(end_time,     'HH24:MI')    AS end_time`,
       [bookingId]
     );
 
@@ -230,14 +252,9 @@ export async function cancelBooking(
 
 export async function getAdminBookings(
   buildingId: string,
-  filters: {
-    amenity_id?: string;
-    date?:       string;
-    status?:     string;
-  }
+  filters:    AdminBookingFilters = {}
 ) {
-  // Build dynamic WHERE clause based on provided filters
-  const conditions: string[] = ['a.building_id = $1'];
+  const conditions: string[]  = ['a.building_id = $1'];
   const values:     unknown[] = [buildingId];
   let   paramIndex = 2;
 
@@ -256,14 +273,12 @@ export async function getAdminBookings(
     values.push(filters.status);
   }
 
-  const whereClause = conditions.join(' AND ');
-
   const result = await pool.query(
     `SELECT
        b.id,
-       b.booking_date,
-       b.start_time,
-       b.end_time,
+       TO_CHAR(b.booking_date, 'YYYY-MM-DD') AS booking_date,
+       TO_CHAR(b.start_time,   'HH24:MI')    AS start_time,
+       TO_CHAR(b.end_time,     'HH24:MI')    AS end_time,
        b.status,
        b.notes,
        b.created_at,
@@ -274,7 +289,7 @@ export async function getAdminBookings(
      FROM bookings b
      JOIN amenities a ON b.amenity_id = a.id
      JOIN users     u ON b.user_id    = u.id
-     WHERE ${whereClause}
+     WHERE ${conditions.join(' AND ')}
      ORDER BY b.booking_date DESC, b.start_time DESC`,
     values
   );
