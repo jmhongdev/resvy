@@ -178,7 +178,7 @@ export async function cancelBooking(
   bookingId:  string,
   userId:     string,
   buildingId: string,
-  userRole:   string
+  userRole:   'resident' | 'admin'
 ) {
   const client = await pool.connect();
 
