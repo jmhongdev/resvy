@@ -1,61 +1,99 @@
 import { pool } from '../db/pool';
 
-// Overview stats
+// Return type interfaces
 
-export async function getOverview(buildingId: string) {
-  // Total bookings this month
-  const totalResult = await pool.query(
-    `SELECT COUNT(*) AS total_bookings
-     FROM bookings b
-     JOIN amenities a ON b.amenity_id = a.id
-     WHERE a.building_id = $1
-       AND b.status != 'cancelled'
-       AND DATE_TRUNC('month', b.booking_date) = DATE_TRUNC('month', CURRENT_DATE)`,
-    [buildingId]
-  );
+export interface OverviewStats {
+  total_bookings_this_month: number;
+  most_booked_amenity:       { name: string; booking_count: number } | null;
+  busiest_day:               { day_name: string; booking_count: number } | null;
+  cancellation_rate_percent: number;
+}
 
-  // Most booked amenity overall
-  const mostBookedResult = await pool.query(
-    `SELECT
-       a.name,
-       COUNT(b.id) AS booking_count
-     FROM bookings b
-     JOIN amenities a ON b.amenity_id = a.id
-     WHERE a.building_id = $1
-       AND b.status != 'cancelled'
-     GROUP BY a.id, a.name
-     ORDER BY booking_count DESC
-     LIMIT 1`,
-    [buildingId]
-  );
+export interface AmenityStat {
+  id:                       string;
+  name:                     string;
+  confirmed_bookings:       number;
+  cancelled_bookings:       number;
+  total_possible_slots:     number;
+  utilization_rate_percent: number;
+}
 
-  // Busiest day of the week (0=Sunday, 6=Saturday)
-  const busiestDayResult = await pool.query(
-    `SELECT
-       TO_CHAR(b.booking_date, 'Day') AS day_name,
-       COUNT(*)                        AS booking_count
-     FROM bookings b
-     JOIN amenities a ON b.amenity_id = a.id
-     WHERE a.building_id = $1
-       AND b.status != 'cancelled'
-     GROUP BY TO_CHAR(b.booking_date, 'Day'), EXTRACT(DOW FROM b.booking_date)
-     ORDER BY booking_count DESC
-     LIMIT 1`,
-    [buildingId]
-  );
+export interface PeakHour {
+  hour:          number;
+  hour_label:    string;
+  booking_count: number;
+}
 
-  // Cancellation rate
-  const cancellationResult = await pool.query(
-    `SELECT
-       COUNT(*) FILTER (WHERE b.status = 'cancelled') AS cancelled,
-       COUNT(*)                                        AS total
-     FROM bookings b
-     JOIN amenities a ON b.amenity_id = a.id
-     WHERE a.building_id = $1`,
-    [buildingId]
-  );
+export interface MonthlyTrend {
+  month:     string;
+  confirmed: number;
+  cancelled: number;
+}
 
-  const { cancelled, total } = cancellationResult.rows[0];
+export interface ResidentStat {
+  name:               string;
+  email:              string;
+  confirmed_bookings: number;
+  cancelled_bookings: number;
+  total_bookings:     number;
+  favourite_amenity:  string | null;
+}
+
+// Service functions
+
+export async function getOverview(buildingId: string): Promise<OverviewStats> {
+  // Run all queries in parallel — reduces latency from sequential to concurrent
+  const [totalResult, mostBookedResult, busiestDayResult, cancellationResult] =
+    await Promise.all([
+      pool.query(
+        `SELECT COUNT(*) AS total_bookings
+         FROM bookings b
+         JOIN amenities a ON b.amenity_id = a.id
+         WHERE a.building_id = $1
+           AND b.status != 'cancelled'
+           AND DATE_TRUNC('month', b.booking_date) = DATE_TRUNC('month', CURRENT_DATE)`,
+        [buildingId]
+      ),
+      pool.query(
+        `SELECT
+           a.name,
+           COUNT(b.id) AS booking_count
+         FROM bookings b
+         JOIN amenities a ON b.amenity_id = a.id
+         WHERE a.building_id = $1
+           AND b.status != 'cancelled'
+         GROUP BY a.id, a.name
+         ORDER BY booking_count DESC
+         LIMIT 1`,
+        [buildingId]
+      ),
+      pool.query(
+        `SELECT
+           TO_CHAR(b.booking_date, 'Day') AS day_name,
+           COUNT(*)                        AS booking_count
+         FROM bookings b
+         JOIN amenities a ON b.amenity_id = a.id
+         WHERE a.building_id = $1
+           AND b.status != 'cancelled'
+         GROUP BY TO_CHAR(b.booking_date, 'Day'), EXTRACT(DOW FROM b.booking_date)
+         ORDER BY booking_count DESC
+         LIMIT 1`,
+        [buildingId]
+      ),
+      pool.query(
+        `SELECT
+           COUNT(*) FILTER (WHERE b.status = 'cancelled') AS cancelled,
+           COUNT(*)                                        AS total
+         FROM bookings b
+         JOIN amenities a ON b.amenity_id = a.id
+         WHERE a.building_id = $1`,
+        [buildingId]
+      ),
+    ]);
+
+  // Explicit Number() conversion, pg returns COUNT as string
+  const cancelled = Number(cancellationResult.rows[0].cancelled);
+  const total     = Number(cancellationResult.rows[0].total);
   const cancellationRate = total > 0
     ? Math.round((cancelled / total) * 100)
     : 0;
@@ -68,13 +106,7 @@ export async function getOverview(buildingId: string) {
   };
 }
 
-// Amenity utilization
-
-export async function getAmenityStats(buildingId: string) {
-  // For each amenity, this part calculates:
-  // - total confirmed bookings
-  // - total possible slots in the last 30 days
-  // - utilization rate = booked / possible * 100
+export async function getAmenityStats(buildingId: string): Promise<AmenityStat[]> {
   const result = await pool.query(
     `WITH amenity_bookings AS (
        SELECT
@@ -96,8 +128,6 @@ export async function getAmenityStats(buildingId: string) {
        name,
        confirmed_bookings,
        cancelled_bookings,
-       -- Calculate total possible slots per day
-       -- then multiply by 30 days
        FLOOR(
          EXTRACT(EPOCH FROM (close_time - open_time)) / 60
          / slot_duration_mins
@@ -124,10 +154,7 @@ export async function getAmenityStats(buildingId: string) {
   return result.rows;
 }
 
-// Peak hours
-export async function getPeakHours(buildingId: string) {
-  // Count bookings per hour across all amenities.
-  // EXTRACT(HOUR FROM start_time) pulls the hour from the time column.
+export async function getPeakHours(buildingId: string): Promise<PeakHour[]> {
   const result = await pool.query(
     `SELECT
        EXTRACT(HOUR FROM b.start_time)::int AS hour,
@@ -145,10 +172,7 @@ export async function getPeakHours(buildingId: string) {
   return result.rows;
 }
 
-// Monthly trends
-export async function getMonthlyTrends(buildingId: string) {
-  // DATE_TRUNC groups bookings by month.
-  // Shows the last 6 months of booking activity.
+export async function getMonthlyTrends(buildingId: string): Promise<MonthlyTrend[]> {
   const result = await pool.query(
     `SELECT
        TO_CHAR(DATE_TRUNC('month', b.booking_date), 'YYYY-MM') AS month,
@@ -166,10 +190,8 @@ export async function getMonthlyTrends(buildingId: string) {
   return result.rows;
 }
 
-//Resident activity
-export async function getResidentStats(buildingId: string) {
-  // Most active residents with their booking counts and cancellation rates.
-  // Uses a subquery to calculate per-user stats then joins with users table.
+export async function getResidentStats(buildingId: string): Promise<ResidentStat[]> {
+  // Uses LATERAL JOIN instead of correlated subquery to avoid N+1 problem
   const result = await pool.query(
     `SELECT
        u.name,
@@ -177,22 +199,22 @@ export async function getResidentStats(buildingId: string) {
        COUNT(b.id) FILTER (WHERE b.status != 'cancelled') AS confirmed_bookings,
        COUNT(b.id) FILTER (WHERE b.status  = 'cancelled') AS cancelled_bookings,
        COUNT(b.id)                                         AS total_bookings,
-       -- Favourite amenity: subquery finds the most booked amenity per user
-       (
-         SELECT a2.name
-         FROM bookings b2
-         JOIN amenities a2 ON b2.amenity_id = a2.id
-         WHERE b2.user_id = u.id
-           AND b2.status != 'cancelled'
-         GROUP BY a2.name
-         ORDER BY COUNT(*) DESC
-         LIMIT 1
-       ) AS favourite_amenity
+       fav.name                                            AS favourite_amenity
      FROM users u
      LEFT JOIN bookings b ON b.user_id = u.id
+     LEFT JOIN LATERAL (
+       SELECT a2.name
+       FROM bookings b2
+       JOIN amenities a2 ON b2.amenity_id = a2.id
+       WHERE b2.user_id = u.id
+         AND b2.status != 'cancelled'
+       GROUP BY a2.name
+       ORDER BY COUNT(*) DESC
+       LIMIT 1
+     ) fav ON true
      WHERE u.building_id = $1
        AND u.role = 'resident'
-     GROUP BY u.id, u.name, u.email
+     GROUP BY u.id, u.name, u.email, fav.name
      ORDER BY confirmed_bookings DESC`,
     [buildingId]
   );
