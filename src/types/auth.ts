@@ -1,3 +1,5 @@
+import type { JwtPayload as JwtBasePayload } from 'jsonwebtoken';
+
 export interface RegisterInput {
   name:          string;
   email:         string;
@@ -10,7 +12,7 @@ export interface LoginInput {
   password: string;
 }
 
-export interface JwtPayload {
+export interface JwtPayload extends JwtBasePayload {
   userId:     string;
   buildingId: string;
   role:       'resident' | 'admin';
