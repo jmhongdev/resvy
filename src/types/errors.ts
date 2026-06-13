@@ -1,9 +1,11 @@
-// Custom error class for expected application errors.
-// Throw this instead of a generic Error to get a specific HTTP status code.
+// Base class for all application errors.
+// All domain-specific error classes extend this.
 export class AppError extends Error {
   constructor(
-    public statusCode: number,
-    public message:    string
+    public code:       string,
+    message:           string,
+    public statusCode: number = 500,
+    public data?:      Record<string, unknown>
   ) {
     super(message);
     this.name = 'AppError';

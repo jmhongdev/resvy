@@ -2,6 +2,7 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { pool } from '../db/pool';
 import type { RegisterInput, LoginInput, JwtPayload } from '../types/auth';
+import { AppError } from '../types/errors';
 
 //Constants
 

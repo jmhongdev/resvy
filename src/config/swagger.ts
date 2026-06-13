@@ -1,4 +1,5 @@
 import swaggerJsdoc from 'swagger-jsdoc';
+import path from 'path';
 
 const options: swaggerJsdoc.Options = {
   definition: {
@@ -10,8 +11,10 @@ const options: swaggerJsdoc.Options = {
     },
     servers: [
       {
-        url:         'http://localhost:3000',
-        description: 'Local development server',
+        url:         process.env.API_URL ?? 'http://localhost:3000',
+        description: process.env.NODE_ENV === 'production'
+          ? 'Production server'
+          : 'Local development server',
       },
     ],
     components: {
@@ -29,7 +32,7 @@ const options: swaggerJsdoc.Options = {
           required: ['name', 'email', 'password', 'building_code'],
           properties: {
             name:          { type: 'string', example: '김지수' },
-            email:         { type: 'string', example: 'jisu@resvy.com' },
+            email:         { type: 'string', format: 'email', example: 'jisu@resvy.com' },
             password:      { type: 'string', example: 'Test1234!' },
             building_code: { type: 'string', example: 'DEMO-BUILD1' },
           },
@@ -38,7 +41,7 @@ const options: swaggerJsdoc.Options = {
           type:     'object',
           required: ['email', 'password'],
           properties: {
-            email:    { type: 'string', example: 'jisu@resvy.com' },
+            email:    { type: 'string', format: 'email', example: 'jisu@resvy.com' },
             password: { type: 'string', example: 'Test1234!' },
           },
         },
@@ -53,9 +56,9 @@ const options: swaggerJsdoc.Options = {
                 user: {
                   type: 'object',
                   properties: {
-                    id:    { type: 'string' },
+                    id:    { type: 'string', format: 'uuid' },
                     name:  { type: 'string' },
-                    email: { type: 'string' },
+                    email: { type: 'string', format: 'email' },
                     role:  { type: 'string', enum: ['resident', 'admin'] },
                   },
                 },
@@ -65,12 +68,12 @@ const options: swaggerJsdoc.Options = {
             },
           },
         },
-        //Amenity schemas
+        // Amenity schemas
         Amenity: {
           type: 'object',
           properties: {
-            id:                 { type: 'string' },
-            building_id:        { type: 'string' },
+            id:                 { type: 'string', format: 'uuid' },
+            building_id:        { type: 'string', format: 'uuid' },
             name:               { type: 'string', example: '헬스장' },
             description:        { type: 'string', example: '최신 운동 기구 완비' },
             capacity:           { type: 'integer', example: 10 },
@@ -82,22 +85,22 @@ const options: swaggerJsdoc.Options = {
             max_advance_days:   { type: 'integer', example: 7 },
           },
         },
-        //Booking schemas
+        // Booking schemas
         Booking: {
           type: 'object',
           properties: {
-            id:           { type: 'string' },
-            user_id:      { type: 'string' },
-            amenity_id:   { type: 'string' },
-            booking_date: { type: 'string', example: '2026-05-10' },
+            id:           { type: 'string', format: 'uuid' },
+            user_id:      { type: 'string', format: 'uuid' },
+            amenity_id:   { type: 'string', format: 'uuid' },
+            booking_date: { type: 'string', format: 'date', example: '2026-05-10' },
             start_time:   { type: 'string', example: '09:00' },
             end_time:     { type: 'string', example: '10:00' },
             status:       { type: 'string', enum: ['confirmed', 'cancelled', 'completed'] },
             notes:        { type: 'string' },
-            created_at:   { type: 'string' },
+            created_at:   { type: 'string', format: 'date-time' },
           },
         },
-        //Error schema
+        // Error schema
         Error: {
           type: 'object',
           properties: {
@@ -109,8 +112,7 @@ const options: swaggerJsdoc.Options = {
     },
     security: [{ bearerAuth: [] }],
   },
-  // Tell swagger-jsdoc where to find the JSDoc comments
-  apis: ['./src/routes/*.ts'],
+  apis: [path.join(__dirname, '../routes/*.ts')],
 };
 
 export const swaggerSpec = swaggerJsdoc(options);
