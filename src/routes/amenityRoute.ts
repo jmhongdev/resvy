@@ -12,6 +12,27 @@ router.use(authenticate);
  *   get:
  *     tags: [Amenities]
  *     summary: List all amenities for the resident's building
+ *     parameters:
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *         description: Search by name or description
+ *       - in: query
+ *         name: min_capacity
+ *         schema:
+ *           type: integer
+ *         description: Minimum capacity filter
+ *       - in: query
+ *         name: location
+ *         schema:
+ *           type: string
+ *         description: Filter by location
+ *       - in: query
+ *         name: available_today
+ *         schema:
+ *           type: boolean
+ *         description: Only show amenities with available slots today
  *     responses:
  *       200:
  *         description: List of amenities
@@ -26,29 +47,9 @@ router.use(authenticate);
  *                   items:
  *                     $ref: '#/components/schemas/Amenity'
  *       401:
- *         description: Unauthorized
+ *         description: Not authenticated
  */
 router.get('/', amenityController.getAmenities);
-
-/**
- * @openapi
- * /amenities/{id}:
- *   get:
- *     tags: [Amenities]
- *     summary: Get a single amenity by ID
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: Amenity details
- *       404:
- *         description: Amenity not found
- */
-router.get('/:id', amenityController.getAmenity);
 
 /**
  * @openapi
@@ -62,36 +63,46 @@ router.get('/:id', amenityController.getAmenity);
  *         required: true
  *         schema:
  *           type: string
+ *           format: uuid
  *       - in: query
  *         name: date
  *         required: true
  *         schema:
  *           type: string
+ *           format: date
  *           example: '2026-05-10'
  *     responses:
  *       200:
  *         description: Available slots
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success: { type: boolean }
- *                 data:
- *                   type: object
- *                   properties:
- *                     amenity_id: { type: string }
- *                     date:       { type: string }
- *                     slots:
- *                       type: array
- *                       items:
- *                         type: object
- *                         properties:
- *                           start_time: { type: string }
- *                           end_time:   { type: string }
- *                           available:  { type: boolean }
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: Amenity not found
  */
 router.get('/:id/availability', amenityController.getAvailability);
+
+/**
+ * @openapi
+ * /amenities/{id}:
+ *   get:
+ *     tags: [Amenities]
+ *     summary: Get a single amenity by ID
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Amenity details
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: Amenity not found
+ */
+router.get('/:id', amenityController.getAmenity);
 
 /**
  * @openapi
@@ -108,6 +119,8 @@ router.get('/:id/availability', amenityController.getAvailability);
  *     responses:
  *       201:
  *         description: Amenity created
+ *       401:
+ *         description: Not authenticated
  *       403:
  *         description: Admin access required
  */
@@ -125,9 +138,12 @@ router.post('/',      requireAdmin, amenityController.createAmenity);
  *         required: true
  *         schema:
  *           type: string
+ *           format: uuid
  *     responses:
  *       200:
  *         description: Amenity updated
+ *       401:
+ *         description: Not authenticated
  *       403:
  *         description: Admin access required
  *       404:
@@ -147,9 +163,12 @@ router.patch('/:id',  requireAdmin, amenityController.updateAmenity);
  *         required: true
  *         schema:
  *           type: string
+ *           format: uuid
  *     responses:
  *       200:
  *         description: Amenity deactivated
+ *       401:
+ *         description: Not authenticated
  *       403:
  *         description: Admin access required
  *       404:

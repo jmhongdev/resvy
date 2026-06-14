@@ -54,6 +54,8 @@ router.post('/register', authController.register);
  *               $ref: '#/components/schemas/AuthResponse'
  *       401:
  *         description: Invalid email or password
+ *       423:
+ *         description: Account locked due to too many failed attempts
  */
 router.post('/login', authController.login);
 

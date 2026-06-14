@@ -16,6 +16,8 @@ router.use(requireAdmin);
  *     responses:
  *       200:
  *         description: Overview statistics
+ *       401:
+ *         description: Not authenticated
  *       403:
  *         description: Admin access required
  */
@@ -30,6 +32,10 @@ router.get('/overview', statsController.getOverview);
  *     responses:
  *       200:
  *         description: Utilization stats per amenity
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
  */
 router.get('/amenities', statsController.getAmenityStats);
 
@@ -42,6 +48,10 @@ router.get('/amenities', statsController.getAmenityStats);
  *     responses:
  *       200:
  *         description: Booking count per hour
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
  */
 router.get('/peak-hours', statsController.getPeakHours);
 
@@ -54,6 +64,10 @@ router.get('/peak-hours', statsController.getPeakHours);
  *     responses:
  *       200:
  *         description: Monthly booking counts for last 6 months
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
  */
 router.get('/monthly-trends', statsController.getMonthlyTrends);
 
@@ -66,6 +80,10 @@ router.get('/monthly-trends', statsController.getMonthlyTrends);
  *     responses:
  *       200:
  *         description: Booking activity per resident
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
  */
 router.get('/residents', statsController.getResidentStats);
 
