@@ -4,7 +4,7 @@ export interface UserProfile {
   id:               string;
   name:             string;
   email:            string;
-  role:             string;
+  role:             'resident' | 'admin';
   created_at:       string;
   building_name:    string;
   building_address: string;
@@ -22,7 +22,7 @@ export async function changePassword(
   currentPassword: string,
   newPassword:     string
 ): Promise<void> {
-  return apiClient.patch('/users/me/password', {
+  await apiClient.patch('/users/me/password', {
     currentPassword,
     newPassword,
   });

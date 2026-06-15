@@ -1,6 +1,7 @@
 import { apiClient } from './client';
 
-interface AuthResult {
+// Matches the backend auth response shape
+export interface AuthResult {
   user: {
     id:    string;
     name:  string;

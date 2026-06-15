@@ -1,11 +1,13 @@
 import { apiClient } from './client';
 
+//Types
+
 export interface Amenity {
   id:                 string;
   name:               string;
-  description:        string;
+  description?:       string;
   capacity:           number;
-  location:           string;
+  location?:          string;
   is_active:          boolean;
   open_time:          string;
   close_time:         string;
@@ -32,10 +34,11 @@ export interface AmenityFilters {
   available_today?: boolean;
 }
 
+// API functions
+
 export async function getAmenities(
   filters: AmenityFilters = {}
 ): Promise<Amenity[]> {
-  // Build query string from filters
   const params = new URLSearchParams();
 
   if (filters.search)          params.set('search',          filters.search);
