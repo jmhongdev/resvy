@@ -1,45 +1,52 @@
 import {
   createContext,
-  useState
+  useState,
 } from 'react';
 import type { ReactNode } from 'react';
 import type { User } from '../types';
 
-// Shape of everything the context provides
-interface AuthContextType {
-  user:     User | null;
-  token:    string | null;
-  login:    (user: User, token: string, refreshToken: string) => void;
-  logout:   () => void;
-  isAdmin:  boolean;
-  loading:  boolean;
+// Types
+
+export interface AuthContextType {
+  user:    User | null;
+  token:   string | null;
+  login:   (user: User, accessToken: string, refreshToken: string) => void;
+  logout:  () => void;
+  isAdmin: boolean;
+  loading: boolean;
 }
 
-// Create the context with a default value of null
-const AuthContext = createContext<AuthContextType | null>(null);
+// Context
+// eslint-disable-next-line react-refresh/only-export-components
+export const AuthContext = createContext<AuthContextType | null>(null);
 
-// Provider wraps the whole app and makes auth available everywhere
+// Provider 
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(() => {
-    const savedUser = localStorage.getItem('user');
-    return savedUser ? JSON.parse(savedUser) : null;
+    try {
+      const saved = localStorage.getItem('user');
+      return saved ? (JSON.parse(saved) as User) : null;
+    } catch {
+      // Corrupted localStorage — clear and start fresh
+      localStorage.removeItem('user');
+      return null;
+    }
   });
 
-  const [token, setToken] = useState<string | null>(() => {
-    return localStorage.getItem('accessToken');
-  });
+  const [token, setToken] = useState<string | null>(() =>
+    localStorage.getItem('accessToken')
+  );
 
+  // loading is always false, initialize from localStorage synchronously
   const loading = false;
 
-  function login(user: User, token: string, refreshToken: string) {
-    // Save to state
-    setUser(user);
-    setToken(token);
-
-    // Save to localStorage so it persists after refresh
-    localStorage.setItem('accessToken',  token);
+  function login(newUser: User, accessToken: string, refreshToken: string) {
+    setUser(newUser);
+    setToken(accessToken);
+    localStorage.setItem('accessToken',  accessToken);
     localStorage.setItem('refreshToken', refreshToken);
-    localStorage.setItem('user',         JSON.stringify(user));
+    localStorage.setItem('user',         JSON.stringify(newUser));
   }
 
   function logout() {
@@ -63,6 +70,3 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     </AuthContext.Provider>
   );
 }
-
-export type { AuthContextType };
-export { AuthContext };
