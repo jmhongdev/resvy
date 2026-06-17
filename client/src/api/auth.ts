@@ -1,5 +1,11 @@
 import { apiClient } from './client';
+import type { User } from '../types';
 
+export interface AuthResult {
+  user:         User;
+  accessToken:  string;
+  refreshToken: string;
+}
 // Matches the backend auth response shape
 export interface AuthResult {
   user: {

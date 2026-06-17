@@ -12,19 +12,23 @@ import AdminBookingsPage from './pages/AdminBookingsPage';
 import ProfilePage from './pages/ProfilePage';
 
 function App() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
+
+  // Wait for auth state to initialize before rendering routes
+  if (loading) {
+    return <div style={{ padding: '2rem' }}>Loading...</div>;
+  }
 
   return (
     <>
-      {/* Only show navbar when logged in */}
       {user && <Navbar />}
 
       <Routes>
-        {/* Public routes */}
-        <Route path="/login"    element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
+        {/* Public routes, redirect to home if already logged in */}
+        <Route path="/login"    element={user ? <Navigate to="/" replace /> : <LoginPage />} />
+        <Route path="/register" element={user ? <Navigate to="/" replace /> : <RegisterPage />} />
 
-        {/* Protected routes — require login */}
+        {/* Protected routes */}
         <Route path="/" element={
           <ProtectedRoute>
             <AmenitiesPage />
@@ -43,6 +47,12 @@ function App() {
           </ProtectedRoute>
         } />
 
+        <Route path="/profile" element={
+          <ProtectedRoute>
+            <ProfilePage />
+          </ProtectedRoute>
+        } />
+
         {/* Admin only */}
         <Route path="/admin" element={
           <ProtectedRoute requireAdmin>
@@ -56,13 +66,7 @@ function App() {
           </ProtectedRoute>
         } />
 
-        <Route path="/profile" element={
-          <ProtectedRoute>
-            <ProfilePage />
-          </ProtectedRoute>
-        } />
-
-        {/* Catch all — redirect to home */}
+        {/* Catch all */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>
