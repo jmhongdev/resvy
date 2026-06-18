@@ -1,4 +1,4 @@
-import { Link, useNavigate } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/useAuth';
 
 export default function Navbar() {
@@ -10,23 +10,34 @@ export default function Navbar() {
     navigate('/login');
   }
 
+  function navLinkStyle({ isActive }: { isActive: boolean }): React.CSSProperties {
+    return {
+      ...styles.link,
+      color:         isActive ? '#2563eb' : '#444',
+      borderBottom:  isActive ? '2px solid #2563eb' : '2px solid transparent',
+      paddingBottom: '2px',
+    };
+  }
+
   return (
     <nav style={styles.nav}>
-      <Link to="/" style={styles.brand}>Resvy</Link>
+      <NavLink to="/" style={styles.brand}>Resvy</NavLink>
 
       <div style={styles.links}>
-        <Link to="/"            style={styles.link}>Amenities</Link>
-        <Link to="/my-bookings" style={styles.link}>My Bookings</Link>
+        <NavLink to="/"            style={navLinkStyle} end>Amenities</NavLink>
+        {!isAdmin && (
+          <NavLink to="/my-bookings" style={navLinkStyle}>My Bookings</NavLink>
+        )}
         {isAdmin && (
           <>
-            <Link to="/admin"          style={styles.link}>Dashboard</Link>
-            <Link to="/admin/bookings" style={styles.link}>Bookings</Link>
+            <NavLink to="/admin"          style={navLinkStyle}>Dashboard</NavLink>
+            <NavLink to="/admin/bookings" style={navLinkStyle}>Bookings</NavLink>
           </>
         )}
       </div>
 
       <div style={styles.right}>
-        <Link to="/profile" style={styles.link}>{user?.name}</Link>
+        <NavLink to="/profile" style={navLinkStyle}>{user?.name}</NavLink>
         <button onClick={handleLogout} style={styles.logoutBtn}>
           Sign out
         </button>
@@ -37,16 +48,16 @@ export default function Navbar() {
 
 const styles: Record<string, React.CSSProperties> = {
   nav: {
-    display:         'flex',
-    alignItems:      'center',
-    justifyContent:  'space-between',
-    padding:         '0 1.5rem',
-    height:          '60px',
-    background:      '#fff',
-    borderBottom:    '1px solid #eee',
-    position:        'sticky',
-    top:             0,
-    zIndex:          100,
+    display:        'flex',
+    alignItems:     'center',
+    justifyContent: 'space-between',
+    padding:        '0 1.5rem',
+    height:         '60px',
+    background:     '#fff',
+    borderBottom:   '1px solid #eee',
+    position:       'sticky',
+    top:            0,
+    zIndex:         100,
   },
   brand: {
     fontSize:       '1.25rem',
@@ -68,10 +79,6 @@ const styles: Record<string, React.CSSProperties> = {
     display:    'flex',
     alignItems: 'center',
     gap:        '1rem',
-  },
-  userName: {
-    fontSize: '0.875rem',
-    color:    '#666',
   },
   logoutBtn: {
     padding:      '0.4rem 0.875rem',

@@ -1,7 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/useAuth';
 import ProtectedRoute from './components/ProtectedRoute';
-import Navbar from './components/NavBar';
+import Navbar from './components/Navbar';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import AmenitiesPage from './pages/AmenitiesPage';

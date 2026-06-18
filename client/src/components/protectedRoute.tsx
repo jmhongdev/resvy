@@ -1,8 +1,9 @@
+import type { ReactNode } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/useAuth';
 
 interface Props {
-  children:      React.ReactNode;
+  children:      ReactNode;
   requireAdmin?: boolean;
 }
 
@@ -19,7 +20,7 @@ export default function ProtectedRoute({ children, requireAdmin }: Props) {
     return <Navigate to="/login" replace />;
   }
 
-  // Logged in but not admin on an admin route , redirect home
+  // Logged in but not admin on an admin route, redirect home
   if (requireAdmin && user.role !== 'admin') {
     return <Navigate to="/" replace />;
   }
