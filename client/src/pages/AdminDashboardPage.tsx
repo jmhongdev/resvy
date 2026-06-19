@@ -1,25 +1,6 @@
 import { useState, useEffect } from 'react';
-import { apiClient } from '../api/client';
-
-interface OverviewStats {
-  total_bookings_this_month: number;
-  most_booked_amenity:       { name: string; booking_count: number } | null;
-  busiest_day:               { day_name: string; booking_count: number } | null;
-  cancellation_rate_percent: number;
-}
-
-interface AmenityStat {
-  name:                    string;
-  confirmed_bookings:      number;
-  total_possible_slots:    number;
-  utilization_rate_percent: number;
-}
-
-interface PeakHour {
-  hour:          number;
-  hour_label:    string;
-  booking_count: number;
-}
+import { getOverview, getAmenityStats, getPeakHours } from '../api/stats';
+import type { OverviewStats, AmenityStat, PeakHour } from '../api/stats';
 
 export default function AdminDashboardPage() {
   const [overview,  setOverview]  = useState<OverviewStats | null>(null);
@@ -32,9 +13,9 @@ export default function AdminDashboardPage() {
     async function load() {
       try {
         const [ov, am, ph] = await Promise.all([
-          apiClient.get<OverviewStats>('/stats/overview'),
-          apiClient.get<AmenityStat[]>('/stats/amenities'),
-          apiClient.get<PeakHour[]>('/stats/peak-hours'),
+          getOverview(),
+          getAmenityStats(),
+          getPeakHours(),
         ]);
         setOverview(ov);
         setAmenities(am);
@@ -55,7 +36,6 @@ export default function AdminDashboardPage() {
     <div style={styles.page}>
       <h1 style={styles.title}>Admin Dashboard</h1>
 
-      {/* Overview cards */}
       <div style={styles.statsGrid}>
         <StatCard
           label="Bookings this month"
@@ -75,7 +55,6 @@ export default function AdminDashboardPage() {
         />
       </div>
 
-      {/* Amenity utilization */}
       <section style={styles.section}>
         <h2 style={styles.sectionTitle}>Amenity utilization (last 30 days)</h2>
         <div style={styles.table}>
@@ -96,7 +75,6 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-      {/* Peak hours */}
       <section style={styles.section}>
         <h2 style={styles.sectionTitle}>Peak hours</h2>
         {peakHours.length === 0 ? (
@@ -175,14 +153,14 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow:    '0 2px 8px rgba(0,0,0,0.06)',
   },
   tableHeader: {
-    display:         'grid',
+    display:             'grid',
     gridTemplateColumns: '1fr 1fr 1fr',
-    padding:         '0.75rem 1.25rem',
-    background:      '#f8faff',
-    fontSize:        '0.8rem',
-    fontWeight:      600,
-    color:           '#555',
-    borderBottom:    '1px solid #eee',
+    padding:             '0.75rem 1.25rem',
+    background:          '#f8faff',
+    fontSize:            '0.8rem',
+    fontWeight:          600,
+    color:               '#555',
+    borderBottom:        '1px solid #eee',
   },
   tableRow: {
     display:             'grid',
