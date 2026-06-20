@@ -1,18 +1,17 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { getAmenities } from '../api/amenities';
 import type { Amenity, AmenityFilters } from '../api/amenities';
 import { useAuth } from '../context/useAuth';
 import { getTodaysBookings } from '../api/bookings';
 import type { Booking } from '../api/bookings';
-import { Link } from 'react-router-dom';
 
 export default function AmenitiesPage() {
-  const navigate          = useNavigate();
-  const { isAdmin }       = useAuth();
-  const [amenities,  setAmenities]  = useState<Amenity[]>([]);
-  const [loading,    setLoading]    = useState(true);
-  const [error,      setError]      = useState('');
+  const navigate    = useNavigate();
+  const { isAdmin }  = useAuth();
+  const [amenities, setAmenities] = useState<Amenity[]>([]);
+  const [loading,   setLoading]   = useState(true);
+  const [error,     setError]     = useState('');
 
   const [todaysBookings, setTodaysBookings] = useState<Booking[]>([]);
 
@@ -21,8 +20,6 @@ export default function AmenitiesPage() {
   const [minCapacity,    setMinCapacity]     = useState('');
   const [availableToday, setAvailableToday] = useState(false);
 
-  // useCallback memoizes the function so it doesn't
-  // get recreated on every render
   const loadAmenities = useCallback(async (filters: AmenityFilters) => {
     setLoading(true);
     setError('');
@@ -44,20 +41,17 @@ export default function AmenitiesPage() {
   }, [loadAmenities]);
 
   useEffect(() => {
-  async function loadTodaysBookings() {
-    try {
-      const data = await getTodaysBookings();
-      console.log('todays bookings:', data);
-      console.log('today date:', new Date().toISOString().split('T')[0]);
-      setTodaysBookings(data);
-    } catch (err) {
-      console.log('error loading todays bookings:', err);
+    async function loadTodaysBookings() {
+      try {
+        const data = await getTodaysBookings();
+        setTodaysBookings(data);
+      } catch {
+        // Silently fail
+      }
     }
-  }
-  loadTodaysBookings();
+    loadTodaysBookings();
   }, []);
 
-  // Apply filters
   function handleSearch() {
     const filters: AmenityFilters = {};
     if (search)         filters.search          = search;
@@ -66,7 +60,6 @@ export default function AmenitiesPage() {
     loadAmenities(filters);
   }
 
-  // Reset all filters
   function handleReset() {
     setSearch('');
     setMinCapacity('');
@@ -77,34 +70,34 @@ export default function AmenitiesPage() {
   return (
     <div style={styles.page}>
       {/* Today's booking banner */}
-        {!isAdmin && todaysBookings.length > 0 && (
-          <div style={styles.banner}>
-            <div style={styles.bannerLeft}>
-              <span style={styles.bannerIcon}>📅</span>
-              <div>
-                <p style={styles.bannerTitle}>
-                  You have {todaysBookings.length} booking{todaysBookings.length > 1 ? 's' : ''} today
-                </p>
-                <div style={styles.bannerBookings}>
-                  {todaysBookings.map(b => (
-                    <span key={b.id} style={styles.bannerBookingItem}>
-                      {b.amenity_name} · {b.start_time.slice(0,5)} — {b.end_time.slice(0,5)}
-                    </span>
-                  ))}
-                </div>
+      {!isAdmin && todaysBookings.length > 0 && (
+        <div style={styles.banner}>
+          <div style={styles.bannerLeft}>
+            <span style={styles.bannerIcon}>📅</span>
+            <div>
+              <p style={styles.bannerTitle}>
+                You have {todaysBookings.length} booking{todaysBookings.length > 1 ? 's' : ''} today
+              </p>
+              <div style={styles.bannerBookings}>
+                {todaysBookings.map(b => (
+                  <span key={b.id} style={styles.bannerBookingItem}>
+                    {b.amenity_name} · {b.start_time.slice(0,5)} — {b.end_time.slice(0,5)}
+                  </span>
+                ))}
               </div>
             </div>
-            <Link to="/my-bookings" style={styles.bannerLink}>
-              View all →
-            </Link>
           </div>
-        )}
+          <Link to="/my-bookings" style={styles.bannerLink}>
+            View all →
+          </Link>
+        </div>
+      )}
+
       <div style={styles.header}>
         <h1 style={styles.title}>Amenities</h1>
         <p style={styles.subtitle}>Book a shared space in your building</p>
       </div>
 
-      {/* Filter bar */}
       <div style={styles.filterBar}>
         <input
           type="text"
@@ -211,11 +204,11 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: '0.25rem',
   },
   filterBar: {
-    display:     'flex',
-    alignItems:  'center',
-    gap:         '0.75rem',
+    display:      'flex',
+    alignItems:   'center',
+    gap:          '0.75rem',
     marginBottom: '1.5rem',
-    flexWrap:    'wrap',
+    flexWrap:     'wrap',
   },
   searchInput: {
     padding:      '0.5rem 0.75rem',
@@ -327,15 +320,15 @@ const styles: Record<string, React.CSSProperties> = {
     color:     '#666',
   },
   banner: {
-  background:     '#eff6ff',
-  border:         '1px solid #bfdbfe',
-  borderRadius:   '12px',
-  padding:        '1rem 1.25rem',
-  marginBottom:   '1.5rem',
-  display:        'flex',
-  alignItems:     'center',
-  justifyContent: 'space-between',
-  gap:            '1rem',
+    background:     '#eff6ff',
+    border:         '1px solid #bfdbfe',
+    borderRadius:   '12px',
+    padding:        '1rem 1.25rem',
+    marginBottom:   '1.5rem',
+    display:        'flex',
+    alignItems:     'center',
+    justifyContent: 'space-between',
+    gap:            '1rem',
   },
   bannerLeft: {
     display:    'flex',
@@ -343,7 +336,7 @@ const styles: Record<string, React.CSSProperties> = {
     gap:        '0.75rem',
   },
   bannerIcon: {
-    fontSize:  '1.25rem',
+    fontSize:   '1.25rem',
     flexShrink: 0,
   },
   bannerTitle: {
