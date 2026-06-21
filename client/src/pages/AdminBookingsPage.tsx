@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { getAdminBookings, cancelBooking } from '../api/bookings';
 import { getAmenities } from '../api/amenities';
-import type { AdminBooking } from '../api/bookings';
+import type { AdminBooking, AdminBookingFilters } from '../api/bookings';
 import type { Amenity } from '../api/amenities';
 
 export default function AdminBookingsPage() {
@@ -15,7 +15,7 @@ export default function AdminBookingsPage() {
   const [date,      setDate]      = useState('');
   const [status,    setStatus]    = useState('');
 
-  async function loadBookings(filters = {}) {
+  const loadBookings = useCallback(async (filters: AdminBookingFilters = {}) => {
     setLoading(true);
     setError('');
     try {
@@ -26,14 +26,14 @@ export default function AdminBookingsPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     async function init() {
       try {
-        const [, amenityData] = await Promise.all([
-          loadBookings(),
+        const [amenityData] = await Promise.all([
           getAmenities(),
+          loadBookings(),
         ]);
         setAmenities(amenityData);
       } catch {
@@ -41,10 +41,10 @@ export default function AdminBookingsPage() {
       }
     }
     init();
-  }, []);
+  }, [loadBookings]);
 
   function handleFilter() {
-    const filters: Record<string, string> = {};
+    const filters: AdminBookingFilters = {};
     if (amenityId) filters.amenity_id = amenityId;
     if (date)      filters.date       = date;
     if (status)    filters.status     = status;
@@ -68,8 +68,8 @@ export default function AdminBookingsPage() {
     }
   }
 
-  const confirmedCount  = bookings.filter(b => b.status === 'confirmed').length;
-  const cancelledCount  = bookings.filter(b => b.status === 'cancelled').length;
+  const confirmedCount = bookings.filter(b => b.status === 'confirmed').length;
+  const cancelledCount = bookings.filter(b => b.status === 'cancelled').length;
 
   return (
     <div style={styles.page}>
@@ -77,7 +77,6 @@ export default function AdminBookingsPage() {
 
       {error && <div style={styles.error}>{error}</div>}
 
-      {/* Summary cards */}
       <div style={styles.summaryGrid}>
         <div style={styles.summaryCard}>
           <p style={styles.summaryLabel}>Total shown</p>
@@ -93,7 +92,6 @@ export default function AdminBookingsPage() {
         </div>
       </div>
 
-      {/* Filters */}
       <div style={styles.filterBar}>
         <select
           value={amenityId}
@@ -132,7 +130,6 @@ export default function AdminBookingsPage() {
         </button>
       </div>
 
-      {/* Bookings table */}
       {loading ? (
         <div style={styles.center}>Loading bookings...</div>
       ) : bookings.length === 0 ? (
@@ -275,17 +272,17 @@ const styles: Record<string, React.CSSProperties> = {
     overflow:     'hidden',
   },
   table: {
-    width:           '100%',
-    borderCollapse:  'collapse',
+    width:          '100%',
+    borderCollapse: 'collapse',
   },
   th: {
-    padding:        '0.875rem 1rem',
-    background:     '#f8faff',
-    fontSize:       '0.8rem',
-    fontWeight:     600,
-    color:          '#555',
-    textAlign:      'left',
-    borderBottom:   '1px solid #eee',
+    padding:      '0.875rem 1rem',
+    background:   '#f8faff',
+    fontSize:     '0.8rem',
+    fontWeight:   600,
+    color:        '#555',
+    textAlign:    'left',
+    borderBottom: '1px solid #eee',
   },
   tr: {
     borderBottom: '1px solid #f5f5f5',
@@ -300,8 +297,8 @@ const styles: Record<string, React.CSSProperties> = {
     color:      '#1a1a1a',
   },
   residentEmail: {
-    fontSize: '0.775rem',
-    color:    '#888',
+    fontSize:  '0.775rem',
+    color:     '#888',
     marginTop: '0.15rem',
   },
   badge: {
