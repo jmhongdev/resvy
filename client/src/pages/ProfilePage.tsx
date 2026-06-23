@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { getProfile, updateName, changePassword } from '../api/users';
 import type { UserProfile } from '../api/users';
+import { getPasswordRules } from '../utils/passwordStrength';
+import PasswordStrengthMeter from '../components/PasswordStrengthMeter';
 
 export default function ProfilePage() {
   const [profile,     setProfile]     = useState<UserProfile | null>(null);
@@ -60,6 +62,12 @@ export default function ProfilePage() {
     e.preventDefault();
     setPwError('');
     setPwSuccess('');
+
+    const allRulesMet = getPasswordRules(newPassword).every(r => r.met);
+    if (!allRulesMet) {
+      setPwError('New password does not meet all requirements');
+      return;
+    }
 
     if (newPassword !== confirmPassword) {
       setPwError('New passwords do not match');
@@ -209,6 +217,7 @@ export default function ProfilePage() {
               placeholder="Min 8 characters"
               required
             />
+            <PasswordStrengthMeter password={newPassword} />
           </div>
 
           <div style={styles.field}>
