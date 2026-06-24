@@ -56,20 +56,20 @@ const ALLOWED_UPDATE_FIELDS: (keyof UpdateAmenityInput)[] = [
 // Helpers
 
 // Convert "HH:MM" or "HH:MM:SS" to minutes since midnight
-function timeToMinutes(time: string): number {
+export function timeToMinutes(time: string): number {
   const [h, m] = time.slice(0, 5).split(':').map(Number);
   return h * 60 + m;
 }
 
 // Convert minutes since midnight back to "HH:MM"
-function minutesToTime(minutes: number): string {
+export function minutesToTime(minutes: number): string {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
 // Generate all time slots between open and close times
-function generateTimeSlots(
+export function generateTimeSlots(
   openTime:         string,
   closeTime:        string,
   slotDurationMins: number
@@ -90,7 +90,7 @@ function generateTimeSlots(
 }
 
 // Check if two time ranges overlap
-function hasOverlap(
+export function hasOverlap(
   slotStart:    number,
   slotEnd:      number,
   bookingStart: number,
