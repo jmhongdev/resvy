@@ -28,6 +28,33 @@ export class BookingError extends Error {
   }
 }
 
+export function isSlotInPast(
+  bookingDate: string,
+  endTime:     string,
+  now:         Date = new Date()
+): boolean {
+  const bookingEndDateTime = new Date(`${bookingDate}T${endTime}:00`);
+  return bookingEndDateTime < now;
+}
+
+export function calculateDaysDiff(
+  bookingDate: string,
+  now:         Date = new Date()
+): number {
+  const todayStr = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, '0'),
+    String(now.getDate()).padStart(2, '0'),
+  ].join('-');
+
+  const todayDate  = new Date(`${todayStr}T00:00:00`);
+  const bookingDay = new Date(`${bookingDate}T00:00:00`);
+
+  return Math.round(
+    (bookingDay.getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24)
+  );
+}
+
 // Service functions
 export async function createBooking(
   userId:     string,
@@ -61,20 +88,13 @@ export async function createBooking(
 
     // 2. Check the booking is not in the past
     // Compare full datetime to prevent booking same-day past slots
-    const now                = new Date();
-    const bookingEndDateTime = new Date(`${booking_date}T${end_time}:00`);
+    const now = new Date();
 
-    if (bookingEndDateTime < now) {
+    if (isSlotInPast(booking_date, end_time, now)) {
       throw new BookingError('PAST_SLOT', 'Cannot book a time slot that has already passed');
     }
 
-    // Check not too far in advance using date strings to avoid timezone issues
-    const todayStr   = now.toISOString().split('T')[0];
-    const todayDate  = new Date(todayStr);
-    const bookingDay = new Date(booking_date);
-    const daysDiff   = Math.round(
-      (bookingDay.getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24)
-    );
+    const daysDiff = calculateDaysDiff(booking_date, now);
 
     if (daysDiff > amenity.max_advance_days) {
       throw new BookingError('TOO_FAR_IN_ADVANCE', 'Booking too far in advance', {
