@@ -16,9 +16,11 @@ export interface Amenity {
 }
 
 export interface TimeSlot {
-  start_time: string;
-  end_time:   string;
-  available:  boolean;
+  start_time:      string;
+  end_time:        string;
+  capacity:        number;
+  spots_remaining: number;
+  available:       boolean;
 }
 
 export interface AvailabilityResult {

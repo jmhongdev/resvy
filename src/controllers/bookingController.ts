@@ -48,7 +48,7 @@ export async function createBooking(
         res.status(400).json({ success: false, message: error.message });
         return;
       }
-      if (error.code === 'SLOT_ALREADY_BOOKED') {
+      if (error.code === 'SLOT_FULL') {
         res.status(409).json({ success: false, message: error.message });
         return;
       }

@@ -323,19 +323,24 @@ export async function getAvailability(
     const slotEndMins   = slotStartMins + amenity.slot_duration_mins;
     const slotEnd       = minutesToTime(slotEndMins);
 
-    const isBooked = bookedSlots.some(booking =>
+    // Count how many existing bookings overlap with this slot
+    const overlappingCount = bookedSlots.filter(booking =>
       hasOverlap(
         slotStartMins,
         slotEndMins,
         timeToMinutes(booking.start_time),
         timeToMinutes(booking.end_time)
       )
-    );
+    ).length;
+
+    const spotsRemaining = amenity.capacity - overlappingCount;
 
     return {
-      start_time: slotStart,
-      end_time:   slotEnd,
-      available:  !isBooked,
+      start_time:       slotStart,
+      end_time:         slotEnd,
+      capacity:         amenity.capacity,
+      spots_remaining:  Math.max(spotsRemaining, 0),
+      available:        spotsRemaining > 0,
     };
   });
 

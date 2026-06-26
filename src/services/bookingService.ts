@@ -70,7 +70,7 @@ export async function createBooking(
 
     // 1. Verify the amenity exists and belongs to the user's building
     const amenityResult = await client.query(
-      `SELECT id, is_active, open_time, close_time, max_advance_days
+      `SELECT id, is_active, open_time, close_time, max_advance_days, capacity
        FROM amenities
        WHERE id = $1 AND building_id = $2`,
       [amenity_id, buildingId]
@@ -102,20 +102,23 @@ export async function createBooking(
       });
     }
 
-    // 3. Check for conflicting bookings with row lock to prevent race conditions
+    // 3. Count overlapping bookings to check capacity
+    // FOR UPDATE locks the overlapping rows so concurrent requests serialize correctly.
     const conflictResult = await client.query(
       `SELECT id FROM bookings
-       WHERE amenity_id   = $1
-         AND booking_date = $2
-         AND status      != 'cancelled'
-         AND start_time   < $3
-         AND end_time     > $4
-       FOR UPDATE`,
+      WHERE amenity_id   = $1
+        AND booking_date = $2
+        AND status      != 'cancelled'
+        AND start_time   < $3
+        AND end_time     > $4
+      FOR UPDATE`,
       [amenity_id, booking_date, end_time, start_time]
     );
 
-    if (conflictResult.rows.length > 0) {
-      throw new BookingError('SLOT_ALREADY_BOOKED', 'This slot is already booked');
+    if (conflictResult.rows.length >= amenity.capacity) {
+      throw new BookingError('SLOT_FULL', 'This slot is fully booked', {
+        capacity: amenity.capacity,
+      });
     }
 
     // 4. Check user doesn't already have a booking for this amenity on this date

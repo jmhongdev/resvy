@@ -127,7 +127,12 @@ export default function AvailabilityPage() {
                   disabled={isUnavailable}
                   title={isPast ? 'This slot has already passed' : ''}
                 >
-                  {slot.start_time.slice(0, 5)}
+                  <span style={styles.slotTime}>{slot.start_time.slice(0, 5)}</span>
+                  {slot.capacity > 1 && !isPast && (
+                    <span style={styles.slotSpots}>
+                      {slot.available ? `${slot.spots_remaining} left` : 'Full'}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -278,5 +283,14 @@ const styles: Record<string, React.CSSProperties> = {
     padding:   '2rem',
     textAlign: 'center',
     color:     '#666',
+  },
+  slotTime: {
+    display: 'block',
+  },
+  slotSpots: {
+    display:   'block',
+    fontSize:  '0.7rem',
+    marginTop: '0.15rem',
+    opacity:   0.8,
   },
 };
