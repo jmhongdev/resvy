@@ -99,6 +99,38 @@ export function hasOverlap(
   return bookingStart < slotEnd && bookingEnd > slotStart;
 }
 
+// Holidays and closed days 
+export interface ClosureInfo {
+  closed_weekdays: number[];
+  holidays:        { date: string; name: string }[];
+}
+
+export async function getClosureInfo(
+  amenityId: string,
+  fromDate:  string,
+  toDate:    string
+): Promise<ClosureInfo> {
+  const amenityResult = await pool.query(
+    `SELECT closed_weekdays FROM amenities WHERE id = $1`,
+    [amenityId]
+  );
+
+  const holidaysResult = await pool.query(
+    `SELECT TO_CHAR(holiday_date, 'YYYY-MM-DD') AS date, name
+     FROM amenity_holidays
+     WHERE amenity_id = $1
+       AND holiday_date BETWEEN $2 AND $3
+     ORDER BY holiday_date ASC`,
+    [amenityId, fromDate, toDate]
+  );
+
+  return {
+    closed_weekdays: amenityResult.rows[0]?.closed_weekdays ?? [],
+    holidays:        holidaysResult.rows,
+  };
+}
+
+
 // Service functions
 
 export async function createAmenity(
@@ -223,7 +255,7 @@ export async function getAmenityById(
   const result = await pool.query(
     `SELECT id, building_id, name, description, capacity, location,
             is_active, open_time, close_time, slot_duration_mins,
-            max_advance_days, created_at
+            max_advance_days, closed_weekdays, created_at
      FROM amenities
      WHERE id = $1 AND building_id = $2`,
     [amenityId, buildingId]
@@ -299,6 +331,27 @@ export async function getAvailability(
 
   if (!amenity.is_active) {
     throw new AmenityError('AMENITY_NOT_ACTIVE', 'Amenity is not active');
+  }
+
+  // Check if this specific date is a closed day for this amenity
+  const requestedDate = new Date(`${date}T00:00:00`);
+  const weekday        = requestedDate.getDay(); // 0=Sun ... 6=Sat
+
+  if (amenity.closed_weekdays.includes(weekday)) {
+    throw new AmenityError('AMENITY_CLOSED', 'Amenity is closed on this day of the week');
+  }
+
+  const holidayCheck = await pool.query(
+    `SELECT name FROM amenity_holidays
+     WHERE amenity_id = $1 AND holiday_date = $2`,
+    [amenityId, date]
+  );
+
+  if (holidayCheck.rows.length > 0) {
+    throw new AmenityError(
+      'AMENITY_CLOSED',
+      `Amenity is closed for ${holidayCheck.rows[0].name}`
+    );
   }
 
   const allSlots = generateTimeSlots(
