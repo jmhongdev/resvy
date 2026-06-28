@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { z, ZodError } from 'zod';
 import * as amenityService from '../services/amenityService';
+import { AmenityError } from '../services/amenityService';
 
 //Validation schemas
 const createAmenitySchema = z.object({
@@ -154,16 +155,46 @@ export async function deactivateAmenity(
   }
 }
 
+export async function getClosures(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const id         = req.params.id as string;
+    const buildingId = req.user!.buildingId;
+    const { from, to } = req.query as { from?: string; to?: string };
+
+    if (!from || !to) {
+      res.status(400).json({ success: false, message: 'from and to query params are required' });
+      return;
+    }
+
+    // Confirm the amenity belongs to this building before exposing closure info
+    await amenityService.getAmenityById(id, buildingId);
+
+    const closures = await amenityService.getClosureInfo(id, from, to);
+
+    res.status(200).json({ success: true, data: closures });
+  } catch (error: unknown) {
+    if (error instanceof AmenityError && error.code === 'AMENITY_NOT_FOUND') {
+      res.status(404).json({ success: false, message: error.message });
+      return;
+    }
+    next(error);
+  }
+}
+
 export async function getAvailability(
   req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const id = req.params.id as string;
-    const buildingId = req.user!.buildingId;
-    const { date }   = availabilitySchema.parse(req.query);
-    const result     = await amenityService.getAvailability(id, buildingId, date);
+    const id          = req.params.id as string;
+    const buildingId  = req.user!.buildingId;
+    const { date }    = availabilitySchema.parse(req.query);
+    const result      = await amenityService.getAvailability(id, buildingId, date);
 
     res.status(200).json({ success: true, data: result });
   } catch (error: unknown) {
@@ -171,14 +202,19 @@ export async function getAvailability(
       res.status(400).json({ success: false, message: 'Validation failed', errors: error.issues });
       return;
     }
-    const message = getErrorMessage(error);
-    if (message === 'AMENITY_NOT_FOUND') {
-      res.status(404).json({ success: false, message: 'Amenity not found' });
-      return;
-    }
-    if (message === 'AMENITY_NOT_ACTIVE') {
-      res.status(400).json({ success: false, message: 'Amenity is not active' });
-      return;
+    if (error instanceof AmenityError) {
+      if (error.code === 'AMENITY_NOT_FOUND') {
+        res.status(404).json({ success: false, message: error.message });
+        return;
+      }
+      if (error.code === 'AMENITY_NOT_ACTIVE') {
+        res.status(400).json({ success: false, message: error.message });
+        return;
+      }
+      if (error.code === 'AMENITY_CLOSED') {
+        res.status(400).json({ success: false, message: error.message });
+        return;
+      }
     }
     next(error);
   }

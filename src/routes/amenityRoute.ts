@@ -176,4 +176,31 @@ router.patch('/:id',  requireAdmin, amenityController.updateAmenity);
  */
 router.delete('/:id', requireAdmin, amenityController.deactivateAmenity);
 
+/**
+ * @openapi
+ * /amenities/{id}/closures:
+ *   get:
+ *     tags: [Amenities]
+ *     summary: Get closed weekdays and holiday dates for an amenity in a date range
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *       - in: query
+ *         name: from
+ *         required: true
+ *         schema: { type: string, format: date }
+ *       - in: query
+ *         name: to
+ *         required: true
+ *         schema: { type: string, format: date }
+ *     responses:
+ *       200:
+ *         description: Closed weekdays and holidays
+ *       401:
+ *         description: Not authenticated
+ */
+router.get('/:id/closures', amenityController.getClosures);
+
 export default router;
