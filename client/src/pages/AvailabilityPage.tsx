@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getAmenity, getAvailability } from '../api/amenities';
+import { getAmenity, getAvailability, getClosures } from '../api/amenities';
 import { createBooking } from '../api/bookings';
-import type { Amenity, TimeSlot } from '../api/amenities';
+import type { Amenity, TimeSlot, ClosureInfo } from '../api/amenities';
 
 export default function AvailabilityPage() {
   const { id }     = useParams<{ id: string }>();
@@ -19,6 +19,7 @@ export default function AvailabilityPage() {
   const [booking,      setBooking]      = useState(false);
   const [error,        setError]        = useState('');
   const [success,      setSuccess]      = useState('');
+  const [closures, setClosures] = useState<ClosureInfo | null>(null);
 
   // Load amenity details on mount
   useEffect(() => {
@@ -52,6 +53,45 @@ export default function AvailabilityPage() {
     }
     loadSlots();
   }, [id, date]);
+
+  //Effect to load closures once amenity is known
+  useEffect(() => {
+  if (!id) return;
+
+  async function loadClosures() {
+      try {
+        const today = new Date();
+        const from  = today.toISOString().split('T')[0];
+
+        const future = new Date();
+        future.setDate(future.getDate() + 90); // look 90 days ahead
+        const to = future.toISOString().split('T')[0];
+
+        const data = await getClosures(id!, from, to);
+        setClosures(data);
+      } catch {
+        // if this fails, dates just won't be visually disabled
+      }
+    }
+    loadClosures();
+  }, [id]);
+
+  //helper function to check if a given date string is closed
+  function isDateClosed(dateStr: string): { closed: boolean; reason?: string } {
+    if (!closures) return { closed: false };
+
+    const weekday = new Date(`${dateStr}T00:00:00`).getDay();
+    if (closures.closed_weekdays.includes(weekday)) {
+      return { closed: true, reason: 'Closed on this day of the week' };
+    }
+
+    const holiday = closures.holidays.find(h => h.date === dateStr);
+    if (holiday) {
+      return { closed: true, reason: `Closed for ${holiday.name}` };
+    }
+
+    return { closed: false };
+  }
 
   async function handleBook() {
     if (!selectedSlot || !id) return;
@@ -94,6 +134,14 @@ export default function AvailabilityPage() {
           onChange={e => setDate(e.target.value)}
           style={styles.dateInput}
         />
+        {(() => {
+          const closedCheck = isDateClosed(date);
+          return closedCheck.closed ? (
+            <span style={styles.closedNotice}>
+              ⚠ {amenity?.name} is closed on this date — {closedCheck.reason}
+            </span>
+          ) : null;
+        })()}
       </div>
 
       {error   && <div style={styles.error}>{error}</div>}
@@ -292,5 +340,14 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize:  '0.7rem',
     marginTop: '0.15rem',
     opacity:   0.8,
+  },
+  closedNotice: {
+  fontSize:  '0.8rem',
+  color:     '#b45309',
+  background: '#fef3c7',
+  border:    '1px solid #fcd34d',
+  borderRadius: '6px',
+  padding:   '0.5rem 0.75rem',
+  marginTop: '0.4rem',
   },
 };

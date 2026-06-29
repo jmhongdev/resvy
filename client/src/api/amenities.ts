@@ -13,6 +13,7 @@ export interface Amenity {
   close_time:         string;
   slot_duration_mins: number;
   max_advance_days:   number;
+  closed_weekdays:    number[];
 }
 
 export interface TimeSlot {
@@ -36,8 +37,23 @@ export interface AmenityFilters {
   available_today?: boolean;
 }
 
-// API functions
+//Closed dates for amenities
+export interface ClosureInfo {
+  closed_weekdays: number[];
+  holidays:        { date: string; name: string }[];
+}
 
+export async function getClosures(
+  id:   string,
+  from: string,
+  to:   string
+): Promise<ClosureInfo> {
+  return apiClient.get<ClosureInfo>(
+    `/amenities/${id}/closures?from=${from}&to=${to}`
+  );
+}
+
+// API functions
 export async function getAmenities(
   filters: AmenityFilters = {}
 ): Promise<Amenity[]> {
