@@ -1,28 +1,37 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { DayPicker } from 'react-day-picker';
 import { getAmenity, getAvailability, getClosures } from '../api/amenities';
 import { createBooking } from '../api/bookings';
 import type { Amenity, TimeSlot, ClosureInfo } from '../api/amenities';
+import 'react-day-picker/dist/style.css';
 
 export default function AvailabilityPage() {
-  const { id }     = useParams<{ id: string }>();
-  const navigate   = useNavigate();
+  const { id }   = useParams<{ id: string }>();
+  const navigate = useNavigate();
 
   const [amenity,      setAmenity]      = useState<Amenity | null>(null);
   const [slots,        setSlots]        = useState<TimeSlot[]>([]);
   const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
-  const [date,         setDate]         = useState(() => {
-    // Default to today's date in YYYY-MM-DD format
-    return new Date().toISOString().split('T')[0];
-  });
-  const [loading,      setLoading]      = useState(true);
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
+  const [closures,     setClosures]     = useState<ClosureInfo | null>(null);
+  const [loading,      setLoading]      = useState(false);
   const [booking,      setBooking]      = useState(false);
   const [error,        setError]        = useState('');
   const [success,      setSuccess]      = useState('');
-  const [closures, setClosures] = useState<ClosureInfo | null>(null);
 
-  // Load amenity details on mount
+  // Format Date object to YYYY-MM-DD string
+  function toDateStr(d: Date): string {
+    return [
+      d.getFullYear(),
+      String(d.getMonth() + 1).padStart(2, '0'),
+      String(d.getDate()).padStart(2, '0'),
+    ].join('-');
+  }
+
+  // Load amenity details
   useEffect(() => {
+    if (!id) return;
     async function loadAmenity() {
       try {
         const data = await getAmenity(id!);
@@ -34,74 +43,59 @@ export default function AvailabilityPage() {
     loadAmenity();
   }, [id]);
 
-  // Load availability whenever date changes
+  // Load closure info which covers today + 90 days
   useEffect(() => {
-    if (!id || !date) return;
-
-    async function loadSlots() {
-      setLoading(true);
-      setSelectedSlot(null);
-      setError('');
+    if (!id) return;
+    async function loadClosures() {
       try {
-        const data = await getAvailability(id!, date);
-        setSlots(data.slots);
-      } catch {
-        setError('Failed to load availability');
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadSlots();
-  }, [id, date]);
-
-  //Effect to load closures once amenity is known
-  useEffect(() => {
-  if (!id) return;
-
-  async function loadClosures() {
-      try {
-        const today = new Date();
-        const from  = today.toISOString().split('T')[0];
-
+        const today  = new Date();
         const future = new Date();
-        future.setDate(future.getDate() + 90); // look 90 days ahead
-        const to = future.toISOString().split('T')[0];
-
-        const data = await getClosures(id!, from, to);
+        future.setDate(future.getDate() + 90);
+        const data = await getClosures(
+          id!,
+          toDateStr(today),
+          toDateStr(future)
+        );
         setClosures(data);
       } catch {
-        // if this fails, dates just won't be visually disabled
+        // Non-critical
       }
     }
     loadClosures();
   }, [id]);
 
-  //helper function to check if a given date string is closed
-  function isDateClosed(dateStr: string): { closed: boolean; reason?: string } {
-    if (!closures) return { closed: false };
-
-    const weekday = new Date(`${dateStr}T00:00:00`).getDay();
-    if (closures.closed_weekdays.includes(weekday)) {
-      return { closed: true, reason: 'Closed on this day of the week' };
+  // Load slots when a date is selected
+  const loadSlots = useCallback(async (date: Date) => {
+    if (!id) return;
+    setLoading(true);
+    setSelectedSlot(null);
+    setError('');
+    try {
+      const data = await getAvailability(id, toDateStr(date));
+      setSlots(data.slots);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load availability');
+      setSlots([]);
+    } finally {
+      setLoading(false);
     }
+  }, [id]);
 
-    const holiday = closures.holidays.find(h => h.date === dateStr);
-    if (holiday) {
-      return { closed: true, reason: `Closed for ${holiday.name}` };
-    }
-
-    return { closed: false };
+  function handleDaySelect(day: Date | undefined) {
+    if (!day) return;
+    setSelectedDate(day);
+    loadSlots(day);
   }
 
   async function handleBook() {
-    if (!selectedSlot || !id) return;
+    if (!selectedSlot || !id || !selectedDate) return;
     setBooking(true);
     setError('');
 
     try {
       await createBooking(
         id,
-        date,
+        toDateStr(selectedDate),
         selectedSlot.start_time,
         selectedSlot.end_time
       );
@@ -114,6 +108,30 @@ export default function AvailabilityPage() {
     }
   }
 
+  // This builds the set of disabled dates for DayPicker
+  function isDateDisabled(date: Date): boolean {
+    // Disable past dates
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (date < today) return true;
+
+    if (!closures) return false;
+
+    // Disable closed weekdays
+    if (closures.closed_weekdays.includes(date.getDay())) return true;
+
+    // Disable holiday dates
+    const dateStr = toDateStr(date);
+    if (closures.holidays.some(h => h.date === dateStr)) return true;
+
+    return false;
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const dateStr = selectedDate ? toDateStr(selectedDate) : null;
+
   return (
     <div style={styles.page}>
       <button onClick={() => navigate('/')} style={styles.back}>
@@ -125,71 +143,119 @@ export default function AvailabilityPage() {
         <p style={styles.location}>📍 {amenity.location}</p>
       )}
 
-      <div style={styles.datePicker}>
-        <label style={styles.label}>Select date</label>
-        <input
-          type="date"
-          value={date}
-          min={new Date().toISOString().split('T')[0]}
-          onChange={e => setDate(e.target.value)}
-          style={styles.dateInput}
-        />
-        {(() => {
-          const closedCheck = isDateClosed(date);
-          return closedCheck.closed ? (
-            <span style={styles.closedNotice}>
-              ⚠ {amenity?.name} is closed on this date — {closedCheck.reason}
-            </span>
-          ) : null;
-        })()}
+      {/* Calendar */}
+      <div style={styles.calendarSection}>
+        <p style={styles.calendarLabel}>Select a date</p>
+
+        <div style={styles.calendarWrapper}>
+          <DayPicker
+            mode="single"
+            selected={selectedDate}
+            onSelect={handleDaySelect}
+            disabled={isDateDisabled}
+            startMonth={today}
+            modifiers={{
+              holiday: (date) => {
+                if (!closures) return false;
+                return closures.holidays.some(h => h.date === toDateStr(date));
+              },
+              closedWeekday: (date) => {
+                if (!closures) return false;
+                return closures.closed_weekdays.includes(date.getDay());
+              },
+            }}
+            modifiersStyles={{
+              holiday: {
+                color:           '#dc2626',
+                textDecoration:  'line-through',
+                backgroundColor: '#fef2f2',
+              },
+              closedWeekday: {
+                color:           '#9ca3af',
+                textDecoration:  'line-through',
+                backgroundColor: '#f9fafb',
+              },
+            }}
+            styles={{
+              root: {
+                fontFamily: 'inherit',
+              },
+            }}
+          />
+        </div>
+
+        {/* Legend */}
+        <div style={styles.legend}>
+          <span style={styles.legendItem}>
+            <span style={{ ...styles.legendDot, background: '#f9fafb', border: '1px solid #ddd' }} />
+            Closed day
+          </span>
+          <span style={styles.legendItem}>
+            <span style={{ ...styles.legendDot, background: '#fef2f2', border: '1px solid #fecaca' }} />
+            Holiday
+          </span>
+          <span style={styles.legendItem}>
+            <span style={{ ...styles.legendDot, background: '#2563eb' }} />
+            Selected
+          </span>
+        </div>
       </div>
 
       {error   && <div style={styles.error}>{error}</div>}
       {success && <div style={styles.success}>{success}</div>}
 
-      {loading ? (
-        <div style={styles.center}>Loading slots...</div>
-      ) : (
+      {/* Slots */}
+      {selectedDate && (
         <>
           <p style={styles.slotsLabel}>
-            Available slots for {date}
+            Available slots for {selectedDate.toLocaleDateString('ko-KR')}
           </p>
-          <div style={styles.slotsGrid}>
-            {slots.map(slot => {
-              // Check if this slot has already passed for today's date
-              const slotEndDateTime = new Date(`${date}T${slot.end_time}:00`);
-              const isPast          = slotEndDateTime < new Date();
-              const isUnavailable   = !slot.available || isPast;
 
-              return (
-                <button
-                  key={slot.start_time}
-                  onClick={() => !isUnavailable && setSelectedSlot(slot)}
-                  style={{
-                    ...styles.slot,
-                    ...(isUnavailable ? styles.slotTaken : {}),
-                    ...(selectedSlot?.start_time === slot.start_time
-                      ? styles.slotSelected
-                      : {}),
-                  }}
-                  disabled={isUnavailable}
-                  title={isPast ? 'This slot has already passed' : ''}
-                >
-                  <span style={styles.slotTime}>{slot.start_time.slice(0, 5)}</span>
-                  {slot.capacity > 1 && !isPast && (
-                    <span style={styles.slotSpots}>
-                      {slot.available ? `${slot.spots_remaining} left` : 'Full'}
+          {loading ? (
+            <div style={styles.center}>Loading slots...</div>
+          ) : (
+            <div style={styles.slotsGrid}>
+              {slots.map(slot => {
+                const slotEndDateTime = new Date(`${dateStr}T${slot.end_time}:00`);
+                const isPast          = slotEndDateTime < new Date();
+                const isUnavailable   = !slot.available || isPast;
+
+                return (
+                  <button
+                    key={slot.start_time}
+                    onClick={() => !isUnavailable && setSelectedSlot(slot)}
+                    style={{
+                      ...styles.slot,
+                      ...(isUnavailable ? styles.slotTaken : {}),
+                      ...(selectedSlot?.start_time === slot.start_time
+                        ? styles.slotSelected
+                        : {}),
+                    }}
+                    disabled={isUnavailable}
+                    title={isPast ? 'This slot has already passed' : ''}
+                  >
+                    <span style={styles.slotTime}>
+                      {slot.start_time.slice(0, 5)}
                     </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+                    {slot.capacity > 1 && !isPast && (
+                      <span style={styles.slotSpots}>
+                        {slot.available
+                          ? `${slot.spots_remaining} left`
+                          : 'Full'}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {selectedSlot && (
             <div style={styles.confirmBox}>
               <p style={styles.confirmText}>
-                Booking: <strong>{selectedSlot.start_time.slice(0,5)} — {selectedSlot.end_time.slice(0,5)}</strong> on {date}
+                Booking: <strong>
+                  {selectedSlot.start_time.slice(0,5)} — {selectedSlot.end_time.slice(0,5)}
+                </strong> on {selectedDate.toLocaleDateString('ko-KR')}
               </p>
               <button
                 onClick={handleBook}
@@ -201,6 +267,12 @@ export default function AvailabilityPage() {
             </div>
           )}
         </>
+      )}
+
+      {!selectedDate && !loading && (
+        <div style={styles.center}>
+          <p style={{ color: '#999' }}>Select a date above to see available slots</p>
+        </div>
       )}
     </div>
   );
@@ -230,23 +302,40 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop:    '0.25rem',
     marginBottom: '1.5rem',
   },
-  datePicker: {
-    display:       'flex',
-    flexDirection: 'column',
-    gap:           '0.25rem',
-    marginBottom:  '1.5rem',
+  calendarSection: {
+    marginBottom: '1.5rem',
   },
-  label: {
-    fontSize:   '0.875rem',
-    fontWeight: 500,
-    color:      '#333',
+  calendarLabel: {
+    fontSize:     '0.875rem',
+    fontWeight:   500,
+    color:        '#333',
+    marginBottom: '0.75rem',
   },
-  dateInput: {
-    padding:      '0.5rem 0.75rem',
-    border:       '1px solid #ddd',
-    borderRadius: '8px',
-    fontSize:     '1rem',
-    maxWidth:     '200px',
+  calendarWrapper: {
+    background:   '#fff',
+    borderRadius: '12px',
+    padding:      '1rem',
+    boxShadow:    '0 2px 8px rgba(0,0,0,0.06)',
+    display:      'inline-block',
+  },
+  legend: {
+    display:    'flex',
+    gap:        '1.25rem',
+    marginTop:  '0.75rem',
+    flexWrap:   'wrap',
+  },
+  legendItem: {
+    display:    'flex',
+    alignItems: 'center',
+    gap:        '0.4rem',
+    fontSize:   '0.775rem',
+    color:      '#555',
+  },
+  legendDot: {
+    width:        '14px',
+    height:       '14px',
+    borderRadius: '3px',
+    display:      'inline-block',
   },
   slotsLabel: {
     fontSize:     '0.9rem',
@@ -278,14 +367,23 @@ const styles: Record<string, React.CSSProperties> = {
     color:      '#fff',
     border:     '1px solid #2563eb',
   },
+  slotTime: {
+    display: 'block',
+  },
+  slotSpots: {
+    display:   'block',
+    fontSize:  '0.7rem',
+    marginTop: '0.15rem',
+    opacity:   0.8,
+  },
   confirmBox: {
-    background:   '#f8faff',
-    border:       '1px solid #bfdbfe',
-    borderRadius: '12px',
-    padding:      '1.25rem',
-    display:      'flex',
+    background:    '#f8faff',
+    border:        '1px solid #bfdbfe',
+    borderRadius:  '12px',
+    padding:       '1.25rem',
+    display:       'flex',
     flexDirection: 'column',
-    gap:          '1rem',
+    gap:           '1rem',
   },
   confirmText: {
     fontSize: '0.95rem',
@@ -331,23 +429,5 @@ const styles: Record<string, React.CSSProperties> = {
     padding:   '2rem',
     textAlign: 'center',
     color:     '#666',
-  },
-  slotTime: {
-    display: 'block',
-  },
-  slotSpots: {
-    display:   'block',
-    fontSize:  '0.7rem',
-    marginTop: '0.15rem',
-    opacity:   0.8,
-  },
-  closedNotice: {
-  fontSize:  '0.8rem',
-  color:     '#b45309',
-  background: '#fef3c7',
-  border:    '1px solid #fcd34d',
-  borderRadius: '6px',
-  padding:   '0.5rem 0.75rem',
-  marginTop: '0.4rem',
   },
 };
