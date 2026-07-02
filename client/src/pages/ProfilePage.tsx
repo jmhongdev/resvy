@@ -3,6 +3,8 @@ import { getProfile, updateName, changePassword } from '../api/users';
 import type { UserProfile } from '../api/users';
 import { getPasswordRules } from '../utils/passwordStrength';
 import PasswordStrengthMeter from '../components/PasswordStrengthMeter';
+import { getMyBookings } from '../api/bookings';
+import { Link } from 'react-router-dom';
 
 export default function ProfilePage() {
   const [profile,     setProfile]     = useState<UserProfile | null>(null);
@@ -24,6 +26,8 @@ export default function ProfilePage() {
   const [pwError,         setPwError]         = useState('');
   const [pwSaving,        setPwSaving]        = useState(false);
 
+  const [upcomingCount, setUpcomingCount] = useState<number | null>(null);
+
   useEffect(() => {
     async function load() {
       try {
@@ -37,6 +41,19 @@ export default function ProfilePage() {
       }
     }
     load();
+  }, []);
+
+  useEffect(() => {
+    async function loadBookingSummary() {
+      try {
+        const data = await getMyBookings();
+        const confirmed = data.upcoming.filter(b => b.status === 'confirmed').length;
+        setUpcomingCount(confirmed);
+      } catch {
+        // Non-critical
+      }
+    }
+    loadBookingSummary();
   }, []);
 
   async function handleUpdateName(e: React.FormEvent) {
@@ -185,6 +202,22 @@ export default function ProfilePage() {
             <p style={styles.infoLabel}>Address</p>
             <p style={styles.infoValue}>{profile.building_address}</p>
           </div>
+        </div>
+      </div>
+
+      {/* Booking summary card */}
+      <div style={styles.card}>
+        <h2 style={styles.cardTitle}>Bookings</h2>
+        <div style={styles.bookingSummary}>
+          <div style={styles.bookingCount}>
+            <p style={styles.bookingCountNumber}>
+              {upcomingCount === null ? '—' : upcomingCount}
+            </p>
+            <p style={styles.bookingCountLabel}>upcoming booking{upcomingCount !== 1 ? 's' : ''}</p>
+          </div>
+          <Link to="/my-bookings" style={styles.viewBookingsBtn}>
+            View all bookings →
+          </Link>
         </div>
       </div>
 
@@ -443,5 +476,30 @@ const styles: Record<string, React.CSSProperties> = {
     padding:   '4rem',
     textAlign: 'center',
     color:     '#666',
+  },
+  bookingSummary: {
+  display:        'flex',
+  alignItems:     'center',
+  justifyContent: 'space-between',
+  },
+  bookingCount: {
+    display:    'flex',
+    alignItems: 'baseline',
+    gap:        '0.5rem',
+  },
+  bookingCountNumber: {
+    fontSize:   '2rem',
+    fontWeight: 700,
+    color:      '#2563eb',
+  },
+  bookingCountLabel: {
+    fontSize: '0.9rem',
+    color:    '#666',
+  },
+  viewBookingsBtn: {
+    color:          '#2563eb',
+    textDecoration: 'none',
+    fontSize:       '0.875rem',
+    fontWeight:     500,
   },
 };
