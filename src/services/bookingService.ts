@@ -70,9 +70,10 @@ export async function createBooking(
 
     // 1. Verify the amenity exists and belongs to the user's building
     const amenityResult = await client.query(
-      `SELECT id, is_active, open_time, close_time, max_advance_days, capacity
-       FROM amenities
-       WHERE id = $1 AND building_id = $2`,
+      `SELECT id, is_active, open_time, close_time, max_advance_days, capacity,
+              booking_window_start, booking_window_end
+      FROM amenities
+      WHERE id = $1 AND building_id = $2`,
       [amenity_id, buildingId]
     );
 
@@ -86,9 +87,26 @@ export async function createBooking(
       throw new BookingError('AMENITY_NOT_ACTIVE', 'Amenity is not active');
     }
 
+    const now = new Date();
+    
+    // Check booking window if configured
+    if (amenity.booking_window_start && amenity.booking_window_end) {
+      const nowTime = now.toTimeString().slice(0, 5); // "HH:MM"
+      const windowStart = amenity.booking_window_start.slice(0, 5);
+      const windowEnd   = amenity.booking_window_end.slice(0, 5);
+
+      if (nowTime < windowStart || nowTime >= windowEnd) {
+        throw new BookingError(
+          'BOOKING_WINDOW_CLOSED',
+          `Bookings can only be made between ${windowStart} and ${windowEnd}`,
+          { window_start: windowStart, window_end: windowEnd }
+        );
+      }
+    }
+
     // 2. Check the booking is not in the past
     // Compare full datetime to prevent booking same-day past slots
-    const now = new Date();
+    
 
     if (isSlotInPast(booking_date, end_time, now)) {
       throw new BookingError('PAST_SLOT', 'Cannot book a time slot that has already passed');

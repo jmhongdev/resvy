@@ -64,6 +64,10 @@ export async function createBooking(
         res.status(400).json({ success: false, message: error.message });
         return;
       }
+      if (error.code === 'BOOKING_WINDOW_CLOSED') {
+        res.status(403).json({ success: false, message: error.message });
+        return;
+      }
     }
 
     next(error);

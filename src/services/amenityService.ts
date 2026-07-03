@@ -188,12 +188,13 @@ export async function getAmenitiesByBuilding(
 
   const result = await pool.query(
     `SELECT
-       id, name, description, capacity, location,
-       is_active, open_time, close_time,
-       slot_duration_mins, max_advance_days
-     FROM amenities
-     WHERE ${conditions.join(' AND ')}
-     ORDER BY name ASC`,
+      id, name, description, capacity, location,
+      is_active, open_time, close_time,
+      slot_duration_mins, max_advance_days,
+      closed_weekdays, booking_window_start, booking_window_end
+    FROM amenities
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY name ASC`,
     values
   );
 
@@ -255,9 +256,11 @@ export async function getAmenityById(
   const result = await pool.query(
     `SELECT id, building_id, name, description, capacity, location,
             is_active, open_time, close_time, slot_duration_mins,
-            max_advance_days, closed_weekdays, created_at
-     FROM amenities
-     WHERE id = $1 AND building_id = $2`,
+            max_advance_days, closed_weekdays,
+            booking_window_start, booking_window_end,
+            created_at
+    FROM amenities
+    WHERE id = $1 AND building_id = $2`,
     [amenityId, buildingId]
   );
 
