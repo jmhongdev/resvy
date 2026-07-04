@@ -108,6 +108,47 @@ export default function AvailabilityPage() {
     }
   }
 
+  function getBookingWindowStatus(amenity: Amenity): {
+  isOpen:      boolean;
+  message:     string;
+  nextOpenMsg: string;
+  } {
+    if (!amenity.booking_window_start || !amenity.booking_window_end) {
+      return { isOpen: true, message: '', nextOpenMsg: '' };
+    }
+
+    const now       = new Date();
+    const nowTime   = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const winStart  = amenity.booking_window_start.slice(0, 5);
+    const winEnd    = amenity.booking_window_end.slice(0, 5);
+
+    const isOpen = nowTime >= winStart && nowTime < winEnd;
+
+    if (isOpen) {
+      return {
+        isOpen:      true,
+        message:     `Booking open until ${winEnd}`,
+        nextOpenMsg: '',
+      };
+    }
+
+    // Before opening time today
+    if (nowTime < winStart) {
+      return {
+        isOpen:      false,
+        message:     'Booking is currently closed',
+        nextOpenMsg: `Opens today at ${winStart}`,
+      };
+    }
+
+    // After closing time — opens tomorrow
+    return {
+      isOpen:      false,
+      message:     'Booking is currently closed',
+      nextOpenMsg: `Opens tomorrow at ${winStart}`,
+    };
+  }
+
   // This builds the set of disabled dates for DayPicker
   function isDateDisabled(date: Date): boolean {
     // Disable past dates
@@ -141,6 +182,28 @@ export default function AvailabilityPage() {
       <h1 style={styles.title}>{amenity?.name ?? 'Loading...'}</h1>
       {amenity?.location && (
         <p style={styles.location}>📍 {amenity.location}</p>
+      )}
+
+      {amenity && amenity.booking_window_start && (
+        (() => {
+          const status = getBookingWindowStatus(amenity);
+          return (
+            <div style={{
+              ...styles.windowBanner,
+              ...(status.isOpen ? styles.windowBannerOpen : styles.windowBannerClosed),
+            }}>
+              <span style={styles.windowIcon}>
+                {status.isOpen ? '🟢' : '🔴'}
+              </span>
+              <div>
+                <p style={styles.windowMessage}>{status.message}</p>
+                {status.nextOpenMsg && (
+                  <p style={styles.windowNext}>{status.nextOpenMsg}</p>
+                )}
+              </div>
+            </div>
+          );
+        })()
       )}
 
       {/* Calendar */}
@@ -259,8 +322,10 @@ export default function AvailabilityPage() {
               </p>
               <button
                 onClick={handleBook}
-                style={booking ? styles.buttonDisabled : styles.button}
-                disabled={booking}
+                style={(booking || (amenity && !getBookingWindowStatus(amenity).isOpen))
+                  ? styles.buttonDisabled
+                  : styles.button}
+                disabled={booking || (amenity ? !getBookingWindowStatus(amenity).isOpen : false)}
               >
                 {booking ? 'Confirming...' : 'Confirm booking'}
               </button>
@@ -429,5 +494,37 @@ const styles: Record<string, React.CSSProperties> = {
     padding:   '2rem',
     textAlign: 'center',
     color:     '#666',
+  },
+  windowBanner: {
+    display:      'flex',
+    alignItems:   'flex-start',
+    gap:          '0.75rem',
+    padding:      '0.875rem 1rem',
+    borderRadius: '10px',
+    marginBottom: '1.25rem',
+    border:       '1px solid',
+  },
+  windowBannerOpen: {
+    background:   '#f0fdf4',
+    borderColor:  '#bbf7d0',
+  },
+  windowBannerClosed: {
+    background:   '#fef2f2',
+    borderColor:  '#fecaca',
+  },
+  windowIcon: {
+    fontSize:   '1rem',
+    flexShrink: 0,
+    marginTop:  '0.1rem',
+  },
+  windowMessage: {
+    fontWeight: 600,
+    fontSize:   '0.875rem',
+    color:      '#1a1a1a',
+  },
+  windowNext: {
+    fontSize:  '0.8rem',
+    color:     '#666',
+    marginTop: '0.2rem',
   },
 };

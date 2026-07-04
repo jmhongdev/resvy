@@ -3,17 +3,19 @@ import { apiClient } from './client';
 //Types
 
 export interface Amenity {
-  id:                 string;
-  name:               string;
-  description?:       string;
-  capacity:           number;
-  location?:          string;
-  is_active:          boolean;
-  open_time:          string;
-  close_time:         string;
-  slot_duration_mins: number;
-  max_advance_days:   number;
-  closed_weekdays:    number[];
+  id:                   string;
+  name:                 string;
+  description?:         string;
+  capacity:             number;
+  location?:            string;
+  is_active:            boolean;
+  open_time:            string;
+  close_time:           string;
+  slot_duration_mins:   number;
+  max_advance_days:     number;
+  closed_weekdays:      number[];
+  booking_window_start: string | null;
+  booking_window_end:   string | null;
 }
 
 export interface TimeSlot {
