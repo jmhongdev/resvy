@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { DayPicker } from 'react-day-picker';
 import { getAmenity, getAvailability, getClosures } from '../api/amenities';
@@ -19,6 +19,7 @@ export default function AvailabilityPage() {
   const [booking,      setBooking]      = useState(false);
   const [error,        setError]        = useState('');
   const [success,      setSuccess]      = useState('');
+  const idempotencyKey = useRef<string>('');
 
   // Format Date object to YYYY-MM-DD string
   function toDateStr(d: Date): string {
@@ -97,7 +98,9 @@ export default function AvailabilityPage() {
         id,
         toDateStr(selectedDate),
         selectedSlot.start_time,
-        selectedSlot.end_time
+        selectedSlot.end_time,
+        undefined,
+        idempotencyKey.current
       );
       setSuccess('Booking confirmed!');
       setTimeout(() => navigate('/my-bookings'), 1500);
@@ -286,7 +289,12 @@ export default function AvailabilityPage() {
                 return (
                   <button
                     key={slot.start_time}
-                    onClick={() => !isUnavailable && setSelectedSlot(slot)}
+                    onClick={() => {
+                      if (!isUnavailable) {
+                        setSelectedSlot(slot);
+                        idempotencyKey.current = crypto.randomUUID();
+                      }
+                    }}
                     style={{
                       ...styles.slot,
                       ...(isUnavailable ? styles.slotTaken : {}),

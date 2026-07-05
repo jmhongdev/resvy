@@ -46,11 +46,12 @@ export async function createBooking(
   booking_date: string,
   start_time:   string,
   end_time:     string,
-  notes?:       string
+  notes?:       string,
+  idempotencyKey?: string
 ): Promise<Booking> {
   return apiClient.post<Booking>('/bookings', {
     amenity_id, booking_date, start_time, end_time, notes,
-  });
+  }, idempotencyKey);
 }
 
 export async function getMyBookings(): Promise<MyBookings> {

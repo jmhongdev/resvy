@@ -20,7 +20,8 @@ async function request<T>(
   method:       string,
   path:         string,
   body?:        unknown,
-  requiresAuth: boolean = true
+  requiresAuth: boolean = true,
+  idempotencyKey?: string
 ): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -31,6 +32,10 @@ async function request<T>(
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
+  }
+
+  if (idempotencyKey) {
+    headers['Idempotency-Key'] = idempotencyKey;
   }
 
   // Abort request after 10 seconds
@@ -73,7 +78,7 @@ async function request<T>(
 
 export const apiClient = {
   get:    <T>(path: string)                 => request<T>('GET',    path),
-  post:   <T>(path: string, body: unknown)  => request<T>('POST',   path, body),
+  post: <T>(path: string, body: unknown, idempotencyKey?: string) =>  request<T>('POST', path, body, true, idempotencyKey),
   patch:  <T>(path: string, body?: unknown) => request<T>('PATCH',  path, body),
   delete: <T>(path: string)                 => request<T>('DELETE', path),
 
