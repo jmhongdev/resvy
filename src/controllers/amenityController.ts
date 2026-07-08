@@ -219,3 +219,116 @@ export async function getAvailability(
     next(error);
   }
 }
+
+export async function updateAmenitySettings(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const id         = req.params.id as string;
+    const buildingId = req.user!.buildingId;
+
+    const schema = z.object({
+      booking_window_start: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
+      booking_window_end:   z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
+      closed_weekdays:      z.array(z.number().int().min(0).max(6)).optional(),
+    });
+
+    const settings = schema.parse(req.body);
+    const result   = await amenityService.updateAmenitySettings(id, buildingId, settings);
+
+    res.status(200).json({ success: true, data: result });
+  } catch (error: unknown) {
+    if (error instanceof ZodError) {
+      res.status(400).json({ success: false, message: 'Validation failed', errors: error.issues });
+      return;
+    }
+    if (error instanceof AmenityError && error.code === 'AMENITY_NOT_FOUND') {
+      res.status(404).json({ success: false, message: error.message });
+      return;
+    }
+    next(error);
+  }
+}
+
+export async function getAmenityHolidays(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const id         = req.params.id as string;
+    const buildingId = req.user!.buildingId;
+    const holidays   = await amenityService.getAmenityHolidays(id, buildingId);
+    res.status(200).json({ success: true, data: holidays });
+  } catch (error: unknown) {
+    if (error instanceof AmenityError && error.code === 'AMENITY_NOT_FOUND') {
+      res.status(404).json({ success: false, message: error.message });
+      return;
+    }
+    next(error);
+  }
+}
+
+export async function addAmenityHoliday(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const id         = req.params.id as string;
+    const buildingId = req.user!.buildingId;
+
+    const schema = z.object({
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format must be YYYY-MM-DD'),
+      name: z.string().min(1).max(100),
+    });
+
+    const { date, name } = schema.parse(req.body);
+    const result         = await amenityService.addAmenityHoliday(id, buildingId, date, name);
+    res.status(201).json({ success: true, data: result });
+  } catch (error: unknown) {
+    if (error instanceof ZodError) {
+      res.status(400).json({ success: false, message: 'Validation failed', errors: error.issues });
+      return;
+    }
+    if (error instanceof AmenityError) {
+      if (error.code === 'AMENITY_NOT_FOUND') {
+        res.status(404).json({ success: false, message: error.message });
+        return;
+      }
+      if (error.code === 'HOLIDAY_EXISTS') {
+        res.status(409).json({ success: false, message: error.message });
+        return;
+      }
+    }
+    next(error);
+  }
+}
+
+export async function deleteAmenityHoliday(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const id         = req.params.id as string;
+    const buildingId = req.user!.buildingId;
+    const date       = req.params.date as string;
+    await amenityService.deleteAmenityHoliday(id, buildingId, date);
+    res.status(200).json({ success: true, message: 'Holiday removed' });
+  } catch (error: unknown) {
+    if (error instanceof AmenityError) {
+      if (error.code === 'AMENITY_NOT_FOUND') {
+        res.status(404).json({ success: false, message: error.message });
+        return;
+      }
+      if (error.code === 'HOLIDAY_NOT_FOUND') {
+        res.status(404).json({ success: false, message: error.message });
+        return;
+      }
+    }
+    next(error);
+  }
+}

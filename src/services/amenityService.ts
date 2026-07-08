@@ -402,3 +402,101 @@ export async function getAvailability(
 
   return { amenity_id: amenityId, date, slots };
 }
+
+export async function updateAmenitySettings(
+  amenityId:  string,
+  buildingId: string,
+  settings: {
+    booking_window_start?: string | null;
+    booking_window_end?:   string | null;
+    closed_weekdays?:      number[];
+  }
+) {
+  const result = await pool.query(
+    `UPDATE amenities
+     SET booking_window_start = $1,
+         booking_window_end   = $2,
+         closed_weekdays      = $3
+     WHERE id = $4 AND building_id = $5
+     RETURNING id, name, booking_window_start, booking_window_end, closed_weekdays`,
+    [
+      settings.booking_window_start ?? null,
+      settings.booking_window_end   ?? null,
+      settings.closed_weekdays      ?? [],
+      amenityId,
+      buildingId,
+    ]
+  );
+
+  if (result.rows.length === 0) {
+    throw new AmenityError('AMENITY_NOT_FOUND', 'Amenity not found');
+  }
+
+  return result.rows[0];
+}
+
+export async function getAmenityHolidays(
+  amenityId:  string,
+  buildingId: string
+) {
+  // Verify amenity belongs to building first
+  await getAmenityById(amenityId, buildingId);
+
+  const result = await pool.query(
+    `SELECT TO_CHAR(holiday_date, 'YYYY-MM-DD') AS date, name
+     FROM amenity_holidays
+     WHERE amenity_id = $1
+     ORDER BY holiday_date ASC`,
+    [amenityId]
+  );
+
+  return result.rows;
+}
+
+export async function addAmenityHoliday(
+  amenityId:  string,
+  buildingId: string,
+  date:       string,
+  name:       string
+) {
+  await getAmenityById(amenityId, buildingId);
+
+  try {
+    const result = await pool.query(
+      `INSERT INTO amenity_holidays (amenity_id, holiday_date, name)
+       VALUES ($1, $2, $3)
+       RETURNING TO_CHAR(holiday_date, 'YYYY-MM-DD') AS date, name`,
+      [amenityId, date, name]
+    );
+    return result.rows[0];
+  } catch (err: unknown) {
+    if (
+      typeof err === 'object' && err !== null && 'code' in err &&
+      (err as { code: string }).code === '23505'
+    ) {
+      throw new AmenityError('HOLIDAY_EXISTS', 'A holiday already exists for this date');
+    }
+    throw err;
+  }
+}
+
+export async function deleteAmenityHoliday(
+  amenityId:  string,
+  buildingId: string,
+  date:       string
+) {
+  await getAmenityById(amenityId, buildingId);
+
+  const result = await pool.query(
+    `DELETE FROM amenity_holidays
+     WHERE amenity_id = $1 AND holiday_date = $2
+     RETURNING TO_CHAR(holiday_date, 'YYYY-MM-DD') AS date`,
+    [amenityId, date]
+  );
+
+  if (result.rows.length === 0) {
+    throw new AmenityError('HOLIDAY_NOT_FOUND', 'Holiday not found');
+  }
+
+  return result.rows[0];
+}
