@@ -84,3 +84,40 @@ export async function getAvailability(
     `/amenities/${id}/availability?date=${date}`
   );
 }
+
+export interface AmenitySettings {
+  booking_window_start?: string | null;
+  booking_window_end?:   string | null;
+  closed_weekdays?:      number[];
+}
+
+export interface Holiday {
+  date: string;
+  name: string;
+}
+
+export async function updateAmenitySettings(
+  id:       string,
+  settings: AmenitySettings
+): Promise<Amenity> {
+  return apiClient.patch<Amenity>(`/amenities/${id}/settings`, settings);
+}
+
+export async function getAmenityHolidays(id: string): Promise<Holiday[]> {
+  return apiClient.get<Holiday[]>(`/amenities/${id}/holidays`);
+}
+
+export async function addAmenityHoliday(
+  id:   string,
+  date: string,
+  name: string
+): Promise<Holiday> {
+  return apiClient.post<Holiday>(`/amenities/${id}/holidays`, { date, name });
+}
+
+export async function deleteAmenityHoliday(
+  id:   string,
+  date: string
+): Promise<void> {
+  return apiClient.delete(`/amenities/${id}/holidays/${date}`);
+}

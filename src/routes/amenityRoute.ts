@@ -203,4 +203,37 @@ router.delete('/:id', requireAdmin, amenityController.deactivateAmenity);
  */
 router.get('/:id/closures', amenityController.getClosures);
 
+/**
+ * @openapi
+ * /amenities/{id}/settings:
+ *   patch:
+ *     tags: [Amenities]
+ *     summary: Update amenity booking window and closed weekdays (admin only)
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Settings updated
+ *       403:
+ *         description: Admin access required
+ */
+router.patch('/:id/settings',          requireAdmin, amenityController.updateAmenitySettings);
+
+/**
+ * @openapi
+ * /amenities/{id}/holidays:
+ *   get:
+ *     tags: [Amenities]
+ *     summary: Get all holidays for an amenity (admin only)
+ *   post:
+ *     tags: [Amenities]
+ *     summary: Add a holiday to an amenity (admin only)
+ */
+router.get('/:id/holidays',            requireAdmin, amenityController.getAmenityHolidays);
+router.post('/:id/holidays',           requireAdmin, amenityController.addAmenityHoliday);
+router.delete('/:id/holidays/:date',   requireAdmin, amenityController.deleteAmenityHoliday);
+
 export default router;
