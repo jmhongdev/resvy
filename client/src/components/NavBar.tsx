@@ -32,6 +32,7 @@ export default function Navbar() {
           <>
             <NavLink to="/admin"          style={navLinkStyle}>Dashboard</NavLink>
             <NavLink to="/admin/bookings" style={navLinkStyle}>Bookings</NavLink>
+            <NavLink to="/admin/amenities" style={navLinkStyle}>Amenities</NavLink>
           </>
         )}
       </div>

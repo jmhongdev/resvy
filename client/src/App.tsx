@@ -10,6 +10,7 @@ import MyBookingsPage from './pages/MyBookingsPage';
 import AdminDashboardPage from './pages/AdminDashboardPage';
 import AdminBookingsPage from './pages/AdminBookingsPage';
 import ProfilePage from './pages/ProfilePage';
+import AdminAmenitiesPage from './pages/AdminAmenitiesPage';
 
 function App() {
   const { user, loading } = useAuth();
@@ -63,6 +64,12 @@ function App() {
         <Route path="/admin/bookings" element={
           <ProtectedRoute requireAdmin>
             <AdminBookingsPage />
+          </ProtectedRoute>
+        } />
+
+        <Route path="/admin/amenities" element={
+          <ProtectedRoute requireAdmin>
+            <AdminAmenitiesPage />
           </ProtectedRoute>
         } />
 
