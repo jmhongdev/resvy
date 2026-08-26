@@ -5,86 +5,39 @@ import type { Amenity, Holiday } from '../api/amenities';
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const WEEKDAY_LABELS_KO = ['일', '월', '화', '수', '목', '금', '토'];
 
-//Error message to keep the server/client messages. This will make failures diagnosable.
-function getErrorMessage(error: unknown, fallback:string): string {
-  return error instanceof Error ? error.message : fallback;
-}
-
 export default function AdminAmenitiesPage() {
   const [amenities,       setAmenities]       = useState<Amenity[]>([]);
   const [selectedId,      setSelectedId]      = useState<string | null>(null);
   const [holidays,        setHolidays]        = useState<Holiday[]>([]);
-
-  //Changed to use use independent loading states
-  //Separate states to prevent the old holidary list from being presented
-  const [loadingAmenities, setLoadingAmenities] = useState(true);
-  const [loadingHolidays, setLoadingHolidays] = useState(false);
+  const [loading,         setLoading]         = useState(true);
   const [saving,          setSaving]          = useState(false);
-  const [addingHoliday,    setAddingHoliday]    = useState(false);
-  const [deletingHoliday,   setDeletingHolidayDate]   = useState(false);
-  useState<string | null>(null);
-
-  //Errors are scoped to the feature that produced them.
-  const [pageError, setPageError] = useState('');
-  const [settingsError, setSettingsError] = useState('');
-  const [holidayError, setHolidayError] = useState('');
-  const [successMsg, setSuccessMsg] = useState('');
+  const [error,           setError]           = useState('');
+  const [successMsg,      setSuccessMsg]      = useState('');
 
   // Settings form state
-  const [winStart,        setWinStart]        = useState(DEFAULT_WINDOW_START);
-  const [winEnd,          setWinEnd]          = useState(DEFAULT_WINDOW_START);
+  const [winStart,        setWinStart]        = useState('');
+  const [winEnd,          setWinEnd]          = useState('');
   const [closedWeekdays,  setClosedWeekdays]  = useState<number[]>([]);
   const [hasWindow,       setHasWindow]       = useState(false);
 
   // Holiday form state
   const [newHolidayDate,  setNewHolidayDate]  = useState('');
   const [newHolidayName,  setNewHolidayName]  = useState('');
+  const [addingHoliday,   setAddingHoliday]   = useState(false);
 
-  // Refs will hold values needed by asynchronous callbacks without waiting for a React render. A mutation captures its starting amenity ID, then compares it with selectedIdRef before changing visible state. 
-  const selectedIdRef = useRef<string | null>(null);
-  
-  // Keep timeout handle allows the cancelling of an older notification timer. Otherwise, the first save's timer could prematurely clear a later save's success message
-  const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Derive the selected object instead of storing a second copy of it.
-  const selectedAmenity = useMemo(
-    () => amenities.find(amenity => amenity.id === selectedId),
-    [amenities, selectedId]
-  );
-
-  //Selection is temporarily locked during writes. 
-  const isMutating = saving || addingHoliday || deletingHolidayDate !== null;
-
-  //Initial request has an active cleanup guard. React strict mode mounts effects twice in development, and navigation can unmount this page while a request is pending. A late respone is ignored instead of writing state into an obsolete effect instance.
   useEffect(() => {
-    let active = true;
-
-    async function loadAmenities() {
-      setLoadingAmenities(true);
-      setPageError('');
-
+    async function load() {
       try {
         const data = await getAmenities();
-        if (!active) return;
-
         setAmenities(data);
-        const firstId = data[0]?.id ?? null;
-        selectedIdRef.current = firstId;
-        setSelectedId(firstId);
-      } catch (error) {
-        if (active) {
-          setPageError(getErrorMessage(error, 'Failed to load amenities'));
-        }
+        if (data.length > 0) selectAmenity(data[0]);
+      } catch {
+        setError('Failed to load amenities');
       } finally {
-        if (active) setLoadingAmenities(false);
+        setLoading(false);
       }
     }
-
-    void loadAmenities();
-
-    return () => {
-      active = false;
-    };
+    load();
   }, []);
 
   async function selectAmenity(amenity: Amenity) {
