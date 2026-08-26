@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+*.log
+context.md
+GAPS.md
+CODEX_CONTEXT.md
