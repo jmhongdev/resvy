@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { getAmenities, updateAmenitySettings, getAmenityHolidays, addAmenityHoliday, deleteAmenityHoliday } from '../api/amenities';
 import type { Amenity, Holiday } from '../api/amenities';
-
+import type { CSSProperties, FormEvent } from 'react';
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const WEEKDAY_LABELS_KO = ['일', '월', '화', '수', '목', '금', '토'];
 
@@ -87,73 +87,178 @@ export default function AdminAmenitiesPage() {
     };
   }, []);
 
-  async function selectAmenity(amenity: Amenity) {
-    setSelectedId(amenity.id);
-    setError('');
+  //Form state is populated whenever the selected amenity object changes. Requiring both window values avoids checking a half-configured backend record as an enabled window.
+  useEffect(() => {
+    if (!selectedAmenity) return;
+
+    const windowEnabled = Boolean(
+      selectedAmenity.booking_window_start && selectedAmenity.booking_window_end
+    );
+
+    setHasWindow(windowEnabled);
+    setWinStart(
+      selectedAmenity.booking_window_start?.slice(0, 5) ?? DEFAULT_WINDOW_START
+    );
+    setWinEnd(
+      selectedAmenity.booking_window_end?.slice(0, 5) ?? DEFAULT_WINDOW_END
+    );
+    setClosedWeekdays(selectedAmenity.closed_weekdays ?? []);
+    setSettingsError('');
     setSuccessMsg('');
+  }, [selectedAmenity]);
 
-    // Populate settings form
-    setHasWindow(!!amenity.booking_window_start);
-    setWinStart(amenity.booking_window_start?.slice(0, 5) ?? '09:00');
-    setWinEnd(amenity.booking_window_end?.slice(0, 5)     ?? '18:00');
-    setClosedWeekdays(amenity.closed_weekdays ?? []);
-
-    // Load holidays
-    try {
-      const h = await getAmenityHolidays(amenity.id);
-      setHolidays(h);
-    } catch {
+  //Another useEffect. Holiday loading is driven by selectedId rather than being mixed into the click handler. when selectedId changes, React first runs the previous cleanup, setting 'active' to false. Older, slower requests cannot overwrite the holidays returned from the newest selection.
+  useEffect(() => {
+    if (!selectedId) {
       setHolidays([]);
+      return;
     }
+
+    let active = true;
+    const amenityId = selectedId;
+
+    async function loadHolidays() {
+      setLoadingHolidays(true);
+      setHolidayError('');
+
+      // Do not show amenity A's holidays while amenity B is loading.
+      setHolidays([]);
+
+      try {
+        const data = await getAmenityHolidays(amenityId);
+        if (active) setHolidays(data);
+      } catch (error) {
+        if (active) {
+          setHolidayError(getErrorMessage(error, 'Failed to load holidays'));
+        }
+      } finally {
+        if (active) setLoadingHolidays(false);
+      }
+    }
+
+    void loadHolidays();
+
+    return () => {
+      active = false;
+    };
+  }, [selectedId]);
+
+  //Cacnel UI timers when the component unmounts
+  useEffect(() => {
+    return () => {
+      if (successTimerRef.current) clearTimeout(successTimerRef.current);
+    };
+  }, []);
+
+  function selectAmenity(amenityId: string) {
+    // Ignore repeated selection and do not allow navigation in the middle of a write. The ref is updated synchronously so pending callbacks see the new ID.
+    if (isMutating || amenityId === selectedIdRef.current) return;
+
+    selectedIdRef.current = amenityId;
+    setSelectedId(amenityId);
+    setNewHolidayDate('');
+    setNewHolidayName('');
   }
 
   function toggleWeekday(day: number) {
-    setClosedWeekdays(prev =>
-      prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]
+    //Sorting gives the API a deterministic payload
+    setClosedWeekdays(previous =>
+      previous.includes(day)
+        ? previous.filter(value => value !== day)
+        : [...previous, day].sort((a, b) => a - b)
     );
   }
 
+  // Validate the relationship between booking-window fields before the network request.
+  function validateWindow(): string | null {
+    if (!hasWindow) return null;
+    if (!winStart || !winEnd) return 'Both booking-window times are required.';
+    if (winStart >= winEnd) {
+      return 'The opening time must be earlier than the closing time.';
+    }
+    return null;
+  }
+
+
   async function handleSaveSettings() {
-    if (!selectedId) return;
+    //Capture the target once.
+    const amenityId = selectedIdRef.current;
+    if (!amenityId) return;
+
+    const validationError = validateWindow();
+    if (validationError) {
+      setSettingsError(validationError);
+      setSuccessMsg('');
+      return;
+    }
+
+    const settings = {
+      booking_window_start: hasWindow ? winStart : null,
+      booking_window_end: hasWindow ? winEnd : null,
+      closed_weekdays: closedWeekdays,
+    };
+
     setSaving(true);
-    setError('');
+    setSettingsError('');
     setSuccessMsg('');
 
     try {
-      const settings = {
-        booking_window_start: hasWindow ? winStart : null,
-        booking_window_end:   hasWindow ? winEnd   : null,
-        closed_weekdays:      closedWeekdays,
-      };
+      await updateAmenitySettings(amenityId, settings);
 
-      await updateAmenitySettings(selectedId, settings);
+      setAmenities(previous =>
+        previous.map(amenity =>
+          amenity.id === amenityId ? { ...amenity, ...settings } : amenity
+        )
+      );
 
-      // Update local amenity list
-      const updated = await getAmenities();
-      setAmenities(updated);
-
-      setSuccessMsg('Settings saved successfully');
-      setTimeout(() => setSuccessMsg(''), 3000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save settings');
+      //ref check is defensive
+      if (selectedIdRef.current === amenityId) {
+        setSuccessMsg('Settings saved successfully');
+        if (successTimerRef.current) clearTimeout(successTimerRef.current);
+        successTimerRef.current = setTimeout(() => setSuccessMsg(''), 3000);
+      }
+    } catch (error) {
+      if (selectedIdRef.current === amenityId) {
+        setSettingsError(getErrorMessage(error, 'Failed to save settings'));
+      }
     } finally {
       setSaving(false);
     }
   }
 
-  async function handleAddHoliday(e: React.FormEvent) {
-    e.preventDefault();
-    if (!selectedId || !newHolidayDate || !newHolidayName) return;
+  async function handleAddHoliday(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const amenityId = selectedIdRef.current;
+    const holidayName = newHolidayName.trim();
+    if (!amenityId || !newHolidayDate) return;
+
+    if (!holidayName) {
+      setHolidayError('Holiday name cannot be blank.');
+      return;
+    }
+
     setAddingHoliday(true);
-    setError('');
+    setHolidayError('');
 
     try {
-      const holiday = await addAmenityHoliday(selectedId, newHolidayDate, newHolidayName);
-      setHolidays(prev => [...prev, holiday].sort((a, b) => a.date.localeCompare(b.date)));
-      setNewHolidayDate('');
-      setNewHolidayName('');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to add holiday');
+      const holiday = await addAmenityHoliday(
+        amenityId,
+        newHolidayDate,
+        holidayName
+      );
+
+      if (selectedIdRef.current === amenityId) {
+        setHolidays(previous =>
+          [...previous, holiday].sort((a, b) => a.date.localeCompare(b.date))
+        );
+        setNewHolidayDate('');
+        setNewHolidayName('');
+      }
+    } catch (error) {
+      if (selectedIdRef.current === amenityId) {
+        setHolidayError(getErrorMessage(error, 'Failed to add holiday'));
+      }
     } finally {
       setAddingHoliday(false);
     }
