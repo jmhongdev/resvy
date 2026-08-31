@@ -1,9 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties, FormEvent } from 'react';
 import { getAmenities, updateAmenitySettings, getAmenityHolidays, addAmenityHoliday, deleteAmenityHoliday } from '../api/amenities';
 import type { Amenity, Holiday } from '../api/amenities';
-import type { CSSProperties, FormEvent } from 'react';
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const WEEKDAY_LABELS_KO = ['일', '월', '화', '수', '목', '금', '토'];
+const DEFAULT_WINDOW_START = '09:00';
+const DEFAULT_WINDOW_END = '18:00';
+
 
 //Error message to keep the server/client messages. This will make failures diagnosable.
 function getErrorMessage(error: unknown, fallback:string): string {
@@ -11,17 +14,17 @@ function getErrorMessage(error: unknown, fallback:string): string {
 }
 
 export default function AdminAmenitiesPage() {
-  const [amenities,       setAmenities]       = useState<Amenity[]>([]);
-  const [selectedId,      setSelectedId]      = useState<string | null>(null);
-  const [holidays,        setHolidays]        = useState<Holiday[]>([]);
+  const [amenities, setAmenities]       = useState<Amenity[]>([]);
+  const [selectedId, setSelectedId]      = useState<string | null>(null);
+  const [holidays, setHolidays]        = useState<Holiday[]>([]);
 
   //Changed to use use independent loading states
   //Separate states to prevent the old holidary list from being presented
   const [loadingAmenities, setLoadingAmenities] = useState(true);
   const [loadingHolidays, setLoadingHolidays] = useState(false);
-  const [saving,          setSaving]          = useState(false);
-  const [addingHoliday,    setAddingHoliday]    = useState(false);
-  const [deletingHoliday,   setDeletingHolidayDate]   = useState(false);
+  const [saving, setSaving]          = useState(false);
+  const [addingHoliday, setAddingHoliday]    = useState(false);
+  const [deletingHolidayDate, setDeletingHolidayDate] =
   useState<string | null>(null);
 
   //Errors are scoped to the feature that produced them.
@@ -31,14 +34,14 @@ export default function AdminAmenitiesPage() {
   const [successMsg, setSuccessMsg] = useState('');
 
   // Settings form state
-  const [winStart,        setWinStart]        = useState(DEFAULT_WINDOW_START);
-  const [winEnd,          setWinEnd]          = useState(DEFAULT_WINDOW_START);
-  const [closedWeekdays,  setClosedWeekdays]  = useState<number[]>([]);
-  const [hasWindow,       setHasWindow]       = useState(false);
+  const [winStart, setWinStart]        = useState(DEFAULT_WINDOW_START);
+  const [winEnd, setWinEnd]          = useState(DEFAULT_WINDOW_END);
+  const [closedWeekdays, setClosedWeekdays]  = useState<number[]>([]);
+  const [hasWindow, setHasWindow]       = useState(false);
 
   // Holiday form state
-  const [newHolidayDate,  setNewHolidayDate]  = useState('');
-  const [newHolidayName,  setNewHolidayName]  = useState('');
+  const [newHolidayDate, setNewHolidayDate]  = useState('');
+  const [newHolidayName, setNewHolidayName]  = useState('');
 
   // Refs will hold values needed by asynchronous callbacks without waiting for a React render. A mutation captures its starting amenity ID, then compares it with selectedIdRef before changing visible state. 
   const selectedIdRef = useRef<string | null>(null);
@@ -68,9 +71,31 @@ export default function AdminAmenitiesPage() {
         if (!active) return;
 
         setAmenities(data);
-        const firstId = data[0]?.id ?? null;
+
+        const firstAmenity = data[0];
+        const firstId = firstAmenity?.id ?? null;
+
         selectedIdRef.current = firstId;
         setSelectedId(firstId);
+
+        if (firstAmenity) {
+          const windowEnabled = Boolean(
+            firstAmenity.booking_window_start &&
+            firstAmenity.booking_window_end
+          );
+
+          setHasWindow(windowEnabled);
+          setWinStart(
+            firstAmenity.booking_window_start?.slice(0, 5) ??
+              DEFAULT_WINDOW_START
+          );
+          setWinEnd(
+            firstAmenity.booking_window_end?.slice(0, 5) ??
+              DEFAULT_WINDOW_END
+          );
+          setClosedWeekdays(firstAmenity.closed_weekdays ?? []);
+          setLoadingHolidays(true);
+        }
       } catch (error) {
         if (active) {
           setPageError(getErrorMessage(error, 'Failed to load amenities'));
@@ -87,52 +112,30 @@ export default function AdminAmenitiesPage() {
     };
   }, []);
 
-  //Form state is populated whenever the selected amenity object changes. Requiring both window values avoids checking a half-configured backend record as an enabled window.
-  useEffect(() => {
-    if (!selectedAmenity) return;
-
-    const windowEnabled = Boolean(
-      selectedAmenity.booking_window_start && selectedAmenity.booking_window_end
-    );
-
-    setHasWindow(windowEnabled);
-    setWinStart(
-      selectedAmenity.booking_window_start?.slice(0, 5) ?? DEFAULT_WINDOW_START
-    );
-    setWinEnd(
-      selectedAmenity.booking_window_end?.slice(0, 5) ?? DEFAULT_WINDOW_END
-    );
-    setClosedWeekdays(selectedAmenity.closed_weekdays ?? []);
-    setSettingsError('');
-    setSuccessMsg('');
-  }, [selectedAmenity]);
-
   //Another useEffect. Holiday loading is driven by selectedId rather than being mixed into the click handler. when selectedId changes, React first runs the previous cleanup, setting 'active' to false. Older, slower requests cannot overwrite the holidays returned from the newest selection.
   useEffect(() => {
-    if (!selectedId) {
-      setHolidays([]);
-      return;
-    }
+    if (!selectedId) return;
 
     let active = true;
     const amenityId = selectedId;
 
     async function loadHolidays() {
-      setLoadingHolidays(true);
-      setHolidayError('');
-
-      // Do not show amenity A's holidays while amenity B is loading.
-      setHolidays([]);
-
       try {
         const data = await getAmenityHolidays(amenityId);
-        if (active) setHolidays(data);
+
+        if (active) {
+          setHolidays(data);
+        }
       } catch (error) {
         if (active) {
-          setHolidayError(getErrorMessage(error, 'Failed to load holidays'));
+          setHolidayError(
+            getErrorMessage(error, 'Failed to load holidays')
+          );
         }
       } finally {
-        if (active) setLoadingHolidays(false);
+        if (active) {
+          setLoadingHolidays(false);
+        }
       }
     }
 
@@ -143,19 +146,41 @@ export default function AdminAmenitiesPage() {
     };
   }, [selectedId]);
 
-  //Cacnel UI timers when the component unmounts
+  //Cancel UI timers when the component unmounts
   useEffect(() => {
     return () => {
       if (successTimerRef.current) clearTimeout(successTimerRef.current);
     };
   }, []);
 
-  function selectAmenity(amenityId: string) {
-    // Ignore repeated selection and do not allow navigation in the middle of a write. The ref is updated synchronously so pending callbacks see the new ID.
-    if (isMutating || amenityId === selectedIdRef.current) return;
+  function selectAmenity(amenity: Amenity) {
+    if (isMutating || amenity.id === selectedIdRef.current) return;
 
-    selectedIdRef.current = amenityId;
-    setSelectedId(amenityId);
+    const windowEnabled = Boolean(
+      amenity.booking_window_start &&
+      amenity.booking_window_end
+    );
+
+    selectedIdRef.current = amenity.id;
+    setSelectedId(amenity.id);
+
+    setHasWindow(windowEnabled);
+    setWinStart(
+      amenity.booking_window_start?.slice(0, 5) ??
+        DEFAULT_WINDOW_START
+    );
+    setWinEnd(
+      amenity.booking_window_end?.slice(0, 5) ??
+        DEFAULT_WINDOW_END
+    );
+    setClosedWeekdays(amenity.closed_weekdays ?? []);
+
+    setSettingsError('');
+    setSuccessMsg('');
+
+    setHolidays([]);
+    setHolidayError('');
+    setLoadingHolidays(true);
     setNewHolidayDate('');
     setNewHolidayName('');
   }
@@ -264,63 +289,114 @@ export default function AdminAmenitiesPage() {
     }
   }
 
-  async function handleDeleteHoliday(date: string) {
-    if (!selectedId) return;
-    if (!confirm(`Remove holiday on ${date}?`)) return;
+  //Now passes the full holiday object so confirmation and accessible button names
+  //can identify the exact item rather than presenting many generic remove actions
+  async function handleDeleteHoliday(holiday: Holiday) {
+    const amenityId = selectedIdRef.current;
+    if (!amenityId) return;
+    if (!window.confirm(`Remove ${holiday.name} on ${holiday.date}?`)) return;
+
+    setDeletingHolidayDate(holiday.date);
+    setHolidayError('');
+
     try {
-      await deleteAmenityHoliday(selectedId, date);
-      setHolidays(prev => prev.filter(h => h.date !== date));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to remove holiday');
+      await deleteAmenityHoliday(amenityId, holiday.date);
+      if (selectedIdRef.current === amenityId) {
+        setHolidays(previous =>
+          previous.filter(item => item.date !== holiday.date)
+        );
+      }
+    } catch (error) {
+      if (selectedIdRef.current === amenityId) {
+        setHolidayError(getErrorMessage(error, 'Failed to remove holiday'));
+      }
+    } finally {
+      setDeletingHolidayDate(null);
     }
   }
 
-  const selectedAmenity = amenities.find(a => a.id === selectedId);
+  // Loading, failure and empty data are three different states now.
+  if (loadingAmenities) {
+    return (
+      <div style={styles.center} role="status" aria-live="polite">
+        Loading amenities...
+      </div>
+    );
+  }
 
-  if (loading) return <div style={styles.center}>Loading...</div>;
+  if (pageError) {
+    return (
+      <div style={styles.center}>
+        <div style={styles.error} role="alert">{pageError}</div>
+      </div>
+    );
+  }
+
+  if (amenities.length === 0) {
+    return <div style={styles.center}>No amenities are available to configure.</div>;
+  }
 
   return (
-    <div style={styles.page}>
+    // main , nav, section added to make the page easier to navigate.
+    <main style={styles.page}>
       <h1 style={styles.title}>Amenity Settings</h1>
 
       <div style={styles.layout}>
-        {/* Amenity list sidebar */}
-        <div style={styles.sidebar}>
-          {amenities.map(a => (
-            <button
-              key={a.id}
-              onClick={() => selectAmenity(a)}
-              style={{
-                ...styles.sidebarItem,
-                ...(a.id === selectedId ? styles.sidebarItemActive : {}),
-              }}
-            >
-              <span style={styles.sidebarName}>{a.name}</span>
-              <span style={styles.sidebarLocation}>{a.location}</span>
-            </button>
-          ))}
-        </div>
+        <nav style={styles.sidebar} aria-label="Amenities">
+          {amenities.map(amenity => {
+            const selected = amenity.id === selectedId;
+            return (
+              <button
+                key={amenity.id}
+                type="button"
+                onClick={() => selectAmenity(amenity)}
+                disabled={isMutating}
+                aria-pressed={selected}
+                style={{
+                  ...styles.sidebarItem,
+                  ...(selected ? styles.sidebarItemActive : {}),
+                  ...(isMutating ? styles.controlDisabled : {}),
+                }}
+              >
+                <span style={styles.sidebarName}>{amenity.name}</span>
+                {amenity.location && (
+                  <span style={styles.sidebarLocation}>{amenity.location}</span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
 
         {/* Settings panel */}
         {selectedAmenity && (
-          <div style={styles.panel}>
-            <h2 style={styles.panelTitle}>{selectedAmenity.name}</h2>
+          <section style={styles.panel} aria-labelledby="amenity-settings-title">
+            <h2 id="amenity-settings-title" style={styles.panelTitle}>
+              {selectedAmenity.name}
+            </h2>
 
-            {error      && <div style={styles.error}>{error}</div>}
-            {successMsg && <div style={styles.success}>{successMsg}</div>}
+            {settingsError && (
+              //Alerts now announced when async error appears.
+              <div style={styles.error} role="alert">{settingsError}</div>
+            )}
+            {successMsg && (
+              <div style={styles.success} role="status" aria-live="polite">
+                {successMsg}
+              </div>
+            )}
 
             {/* Booking window */}
             <div style={styles.section}>
               <h3 style={styles.sectionTitle}>Booking window</h3>
               <p style={styles.sectionDesc}>
-                Restrict when residents can make bookings. If disabled, bookings are accepted 24/7.
+                Restrict when residents can make bookings. If disabled, bookings are
+                accepted 24/7.
               </p>
 
               <label style={styles.checkboxLabel}>
                 <input
                   type="checkbox"
                   checked={hasWindow}
-                  onChange={e => setHasWindow(e.target.checked)}
+                  onChange={event => setHasWindow(event.target.checked)}
                 />
                 Enable booking window
               </label>
@@ -328,22 +404,30 @@ export default function AdminAmenitiesPage() {
               {hasWindow && (
                 <div style={styles.timeRow}>
                   <div style={styles.field}>
-                    <label style={styles.label}>Opens at</label>
+                    <label htmlFor="booking-window-start" style={styles.label}>
+                      Opens at
+                    </label>
                     <input
+                      id="booking-window-start"
                       type="time"
                       value={winStart}
-                      onChange={e => setWinStart(e.target.value)}
+                      onChange={event => setWinStart(event.target.value)}
                       style={styles.timeInput}
+                      required
                     />
                   </div>
-                  <span style={styles.timeSeparator}>—</span>
+                  <span style={styles.timeSeparator} aria-hidden="true">–</span>
                   <div style={styles.field}>
-                    <label style={styles.label}>Closes at</label>
+                    <label htmlFor="booking-window-end" style={styles.label}>
+                      Closes at
+                    </label>
                     <input
+                      id="booking-window-end"
                       type="time"
                       value={winEnd}
-                      onChange={e => setWinEnd(e.target.value)}
+                      onChange={event => setWinEnd(event.target.value)}
                       style={styles.timeInput}
+                      required
                     />
                   </div>
                 </div>
@@ -357,25 +441,32 @@ export default function AdminAmenitiesPage() {
                 Select days this amenity is closed every week.
               </p>
 
-              <div style={styles.weekdayGrid}>
-                {WEEKDAY_LABELS.map((label, day) => (
-                  <button
-                    key={day}
-                    onClick={() => toggleWeekday(day)}
-                    style={{
-                      ...styles.weekdayBtn,
-                      ...(closedWeekdays.includes(day) ? styles.weekdayBtnClosed : {}),
-                    }}
-                  >
-                    <span>{WEEKDAY_LABELS_KO[day]}</span>
-                    <span style={styles.weekdayEn}>{label}</span>
-                  </button>
-                ))}
+              <div style={styles.weekdayGrid} aria-label="Closed weekdays">
+                {WEEKDAY_LABELS.map((label, day) => {
+                  const closed = closedWeekdays.includes(day);
+                  return (
+                    <button
+                      key={day}
+                      type="button"
+                      onClick={() => toggleWeekday(day)}
+                      aria-pressed={closed}
+                      aria-label={`${label}: ${closed ? 'closed' : 'open'}`}
+                      style={{
+                        ...styles.weekdayBtn,
+                        ...(closed ? styles.weekdayBtnClosed : {}),
+                      }}
+                    >
+                      <span>{WEEKDAY_LABELS_KO[day]}</span>
+                      <span style={styles.weekdayEn}>{label}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
             <button
-              onClick={handleSaveSettings}
+              type="button"
+              onClick={() => void handleSaveSettings()}
               style={saving ? styles.buttonDisabled : styles.button}
               disabled={saving}
             >
@@ -389,68 +480,83 @@ export default function AdminAmenitiesPage() {
                 Dates this amenity is closed. Residents cannot book on these days.
               </p>
 
+              {holidayError && (
+                <div style={styles.error} role="alert">{holidayError}</div>
+              )}
+
               {/* Existing holidays */}
-              {holidays.length === 0 ? (
+              {loadingHolidays ? (
+                <p style={styles.empty} role="status">Loading holidays...</p>
+              ) : holidays.length === 0 ? (
                 <p style={styles.empty}>No holidays added yet.</p>
               ) : (
                 <div style={styles.holidayList}>
-                  {holidays.map(h => (
-                    <div key={h.date} style={styles.holidayItem}>
-                      <div>
-                        <p style={styles.holidayDate}>{h.date}</p>
-                        <p style={styles.holidayName}>{h.name}</p>
+                  {holidays.map(holiday => {
+                    const deleting = deletingHolidayDate === holiday.date;
+                    return (
+                      <div key={holiday.date} style={styles.holidayItem}>
+                        <div>
+                          <p style={styles.holidayDate}>{holiday.date}</p>
+                          <p style={styles.holidayName}>{holiday.name}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteHoliday(holiday)}
+                          style={styles.deleteBtn}
+                          disabled={deletingHolidayDate !== null}
+                           aria-label={`Remove ${holiday.name} on ${holiday.date}`}
+                        >
+                          {deleting ? 'Removing...' : 'Remove'}
+                        </button>
                       </div>
-                      <button
-                        onClick={() => handleDeleteHoliday(h.date)}
-                        style={styles.deleteBtn}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 
               {/* Add holiday form */}
               <form onSubmit={handleAddHoliday} style={styles.addHolidayForm}>
                 <div style={styles.field}>
-                  <label style={styles.label}>Date</label>
+                  <label htmlFor="holiday-date" style={styles.label}>Date</label>
                   <input
+                    id="holiday-date"
                     type="date"
                     value={newHolidayDate}
-                    onChange={e => setNewHolidayDate(e.target.value)}
+                    onChange={event => setNewHolidayDate(event.target.value)}
                     style={styles.dateInput}
                     required
                   />
                 </div>
                 <div style={{ ...styles.field, flex: 1 }}>
-                  <label style={styles.label}>Holiday name</label>
+                  <label htmlFor="holiday-name" style={styles.label}>Holiday name</label>
                   <input
+                    id="holiday-name"
                     type="text"
                     value={newHolidayName}
-                    onChange={e => setNewHolidayName(e.target.value)}
+                    onChange={event => setNewHolidayName(event.target.value)}
                     style={styles.textInput}
                     placeholder="e.g. 추석"
+                    maxLength={100}
                     required
                   />
                 </div>
                 <button
                   type="submit"
                   style={addingHoliday ? styles.buttonDisabled : styles.addBtn}
-                  disabled={addingHoliday}
+                  disabled={addingHoliday || loadingHolidays}
                 >
                   {addingHoliday ? 'Adding...' : 'Add'}
                 </button>
               </form>
             </div>
-          </div>
+          </section>
         )}
       </div>
-    </div>
+    </main>
   );
 }
 
-const styles: Record<string, React.CSSProperties> = {
+const styles: Record<string, CSSProperties> = {
   page: {
     maxWidth: '1000px',
     margin:   '0 auto',
