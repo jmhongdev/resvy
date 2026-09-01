@@ -1,19 +1,70 @@
 import { useState, useEffect, useCallback } from 'react';
+import type { CSSProperties, FormEvent } from 'react';
 import { getAdminBookings, cancelBooking } from '../api/bookings';
 import { getAmenities } from '../api/amenities';
 import type { AdminBooking, AdminBookingFilters } from '../api/bookings';
 import type { Amenity } from '../api/amenities';
 
+type StatusFilter = '' | AdminBooking['status'];
+
+//Using one error conversion rule everywhere so that useful API
+//messages are preserved while non-Error throws still receive a safe fallback.
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
+//Construct API payload in one place. Empty strings used because controlled form elements need string values. The API receives only filters that the admin actually selected.
+function buildFilters(
+  amenityId: string,
+  date: string,
+  status: StatusFilter
+): AdminBookingFilters {
+  return {
+    ...(amenityId ? { amenity_id: amenityId } : {}),
+    ...(date ? { date } : {}),
+    ...(status ? { status } : {}),
+  };
+}
+
+//API returns 'YYYY-MM-DD'. Parsing that string with new Date(value) treats it as UTC and can display the previous date in negative UTC. So created an explicit UTC date and formatting in UTC keeps the date-only value stable.
+function formatBookingDate(value: string): string {
+  const [year, month, day] = value.slice(0, 10).split('-').map(Number);
+  if (!year || !month || !day) return value;
+
+  return new Intl.DateTimeFormat('ko-KR', {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    timeZone: 'UTC',
+  }).format(new Date(Date.UTC(year, month - 1, day)));
+}
+
+function formatStatus(status: AdminBooking['status']): string {
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+
+
 export default function AdminBookingsPage() {
   const [bookings,  setBookings]  = useState<AdminBooking[]>([]);
   const [amenities, setAmenities] = useState<Amenity[]>([]);
-  const [loading,   setLoading]   = useState(true);
-  const [error,     setError]     = useState('');
+
+  //Amenities and bookings are independent requests. Separate state means a failed dropdown request does not erase a useful booking error or prevent booking results from rendering.
+  const [loadingBookings, setLoadingBookings] = useState(true);
+  const [loadingAmenities, setLoadingAmenities] = useState(true);
+  const [bookingsError, setBookingsError] = useState('');
+  const [amenitiesError, setAmenitiesError] = useState('');
+  const [cancelError, setCancelError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
 
   // Filter state
   const [amenityId, setAmenityId] = useState('');
   const [date,      setDate]      = useState('');
   const [status,    setStatus]    = useState('');
+
+  //Track filters that produced the currently displayed bookings, separately from the editable controls. 
+  const appliedFiltersRef = useRef<AdminBookingFilters>({});
 
   const loadBookings = useCallback(async (filters: AdminBookingFilters = {}) => {
     setLoading(true);
