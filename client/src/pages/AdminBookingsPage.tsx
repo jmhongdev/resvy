@@ -1,8 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent } from 'react';
-import { getAdminBookings, cancelBooking } from '../api/bookings';
+import { cancelBooking, getAdminBookings } from '../api/bookings';
+import type {
+  AdminBooking,
+  AdminBookingFilters,
+} from '../api/bookings';
 import { getAmenities } from '../api/amenities';
-import type { AdminBooking, AdminBookingFilters } from '../api/bookings';
 import type { Amenity } from '../api/amenities';
 
 type StatusFilter = '' | AdminBooking['status'];
@@ -60,192 +63,327 @@ export default function AdminBookingsPage() {
 
   // Filter state
   const [amenityId, setAmenityId] = useState('');
-  const [date,      setDate]      = useState('');
-  const [status,    setStatus]    = useState('');
+  const [date, setDate]      = useState('');
+  const [status, setStatus] = useState<StatusFilter>('');
 
   //Track filters that produced the currently displayed bookings, separately from the editable controls. 
   const appliedFiltersRef = useRef<AdminBookingFilters>({});
 
-  const loadBookings = useCallback(async (filters: AdminBookingFilters = {}) => {
-    setLoading(true);
-    setError('');
-    try {
-      const data = await getAdminBookings(filters);
-      setBookings(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load bookings');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  //Only the newest request may update shared state
+  const bookingRequestIdRef = useRef(0);
+  const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  //All state changes occur after their external request settles, avoiding synchronous derived-state effects and allowing partial success.
   useEffect(() => {
-    async function init() {
+    let active = true;
+    const bookingRequestId = ++bookingRequestIdRef.current;
+
+    async function loadInitialAmenities() {
       try {
-        const [amenityData] = await Promise.all([
-          getAmenities(),
-          loadBookings(),
-        ]);
-        setAmenities(amenityData);
-      } catch {
-        setError('Failed to load data');
+        const data = await getAmenities();
+        if (active) setAmenities(data);
+      } catch (error) {
+        if (active) {
+          setAmenitiesError(getErrorMessage(error, 'Failed to load amenities'));
+        }
+      } finally {
+        if (active) setLoadingAmenities(false);
       }
     }
-    init();
-  }, [loadBookings]);
 
-  function handleFilter() {
-    const filters: AdminBookingFilters = {};
-    if (amenityId) filters.amenity_id = amenityId;
-    if (date)      filters.date       = date;
-    if (status)    filters.status     = status;
-    loadBookings(filters);
+    async function loadInitialBookings() {
+      try {
+        const data = await getAdminBookings();
+        if (active && bookingRequestId === bookingRequestIdRef.current) {
+          setBookings(data);
+          appliedFiltersRef.current = {};
+        }
+      } catch (error) {
+        if (active && bookingRequestId === bookingRequestIdRef.current) {
+          setBookingsError(getErrorMessage(error, 'Failed to load bookings'));
+        }
+      } finally {
+        if (active && bookingRequestId === bookingRequestIdRef.current) {
+          setLoadingBookings(false);
+        }
+      }
+    }
+
+    void loadInitialAmenities();
+    void loadInitialBookings();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  //Clean up the successs message timer on unmount. Replacing the timer before each message also prevents an earlier cancellation from clearing a newer one.
+  useEffect(() => {
+    return () => {
+      if (successTimerRef.current) clearTimeout(successTimerRef.current);
+    };
+  }, []);
+
+  async function loadBookings(filters: AdminBookingFilters) {
+    const requestId = ++bookingRequestIdRef.current;
+    setLoadingBookings(true);
+    setBookingsError('');
+    setCancelError('');
+    setSuccessMessage('');
+
+    //Clear old rows while loading. 
+    setBookings([]);
+
+    try {
+      const data = await getAdminBookings(filters);
+      if (requestId !== bookingRequestIdRef.current) return;
+
+      setBookings(data);
+      appliedFiltersRef.current = filters;
+    } catch (error) {
+      if (requestId === bookingRequestIdRef.current) {
+        setBookingsError(getErrorMessage(error, 'Failed to load bookings'));
+      }
+    } finally {
+      if (requestId === bookingRequestIdRef.current) {
+        setLoadingBookings(false);
+      }
+    }
+  }
+
+  function handleFilter(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void loadBookings(buildFilters(amenityId, date, status));
   }
 
   function handleReset() {
     setAmenityId('');
     setDate('');
     setStatus('');
-    loadBookings();
+    void loadBookings({});
   }
 
-  async function handleCancel(id: string, residentName: string) {
-    if (!confirm(`Cancel booking for ${residentName}?`)) return;
+  async function handleCancel(booking: AdminBooking) {
+    if (
+      !window.confirm(
+        `Cancel ${booking.amenity_name} booking for ${booking.resident_name} on ${booking.booking_date}?`
+      )
+    ) {
+      return;
+    }
+
+    const bookingId = booking.id;
+    setCancellingId(bookingId);
+    setCancelError('');
+    setSuccessMessage('');
+
     try {
-      await cancelBooking(id);
-      handleFilter();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to cancel booking');
+      await cancelBooking(bookingId);
+
+      //Do not refetch after a successful cancellation.
+      setBookings(previous => {
+        if (appliedFiltersRef.current.status === 'confirmed') {
+          return previous.filter(item => item.id !== bookingId);
+        }
+
+        return previous.map(item =>
+          item.id === bookingId ? { ...item, status: 'cancelled' } : item
+        );
+      });
+
+      setSuccessMessage(`Booking for ${booking.resident_name} was cancelled.`);
+      if (successTimerRef.current) clearTimeout(successTimerRef.current);
+      successTimerRef.current = setTimeout(() => setSuccessMessage(''), 3000);
+    } catch (error) {
+      setCancelError(getErrorMessage(error, 'Failed to cancel booking'));
+    } finally {
+      setCancellingId(null);
     }
   }
 
-  const confirmedCount = bookings.filter(b => b.status === 'confirmed').length;
-  const cancelledCount = bookings.filter(b => b.status === 'cancelled').length;
+  const confirmedCount = bookings.filter(
+    booking => booking.status === 'confirmed'
+  ).length;
+  const cancelledCount = bookings.filter(
+    booking => booking.status === 'cancelled'
+  ).length;
+  const controlsDisabled = loadingBookings || cancellingId !== null;
 
   return (
-    <div style={styles.page}>
+    <main style={styles.page}>
       <h1 style={styles.title}>Booking Management</h1>
 
-      {error && <div style={styles.error}>{error}</div>}
+      {amenitiesError && (
+        <div style={styles.warning} role="alert">
+          Amenity filter unavailable: {amenitiesError}
+        </div>
+      )}
+      {bookingsError && (
+        <div style={styles.error} role="alert">{bookingsError}</div>
+      )}
+      {cancelError && (
+        <div style={styles.error} role="alert">{cancelError}</div>
+      )}
+      {successMessage && (
+        <div style={styles.success} role="status" aria-live="polite">
+          {successMessage}
+        </div>
+      )}
 
-      <div style={styles.summaryGrid}>
+      <section style={styles.summaryGrid} aria-label="Displayed booking summary">
         <div style={styles.summaryCard}>
           <p style={styles.summaryLabel}>Total shown</p>
-          <p style={styles.summaryValue}>{bookings.length}</p>
+          <p style={styles.summaryValue}>{loadingBookings ? '...' : bookings.length}</p>
         </div>
         <div style={styles.summaryCard}>
           <p style={styles.summaryLabel}>Confirmed</p>
-          <p style={{ ...styles.summaryValue, color: '#16a34a' }}>{confirmedCount}</p>
+          <p style={{ ...styles.summaryValue, color: '#15803d' }}>
+            {loadingBookings ? '...' : confirmedCount}
+          </p>
         </div>
         <div style={styles.summaryCard}>
           <p style={styles.summaryLabel}>Cancelled</p>
-          <p style={{ ...styles.summaryValue, color: '#dc2626' }}>{cancelledCount}</p>
+          <p style={{ ...styles.summaryValue, color: '#b91c1c' }}>
+            {loadingBookings ? '...' : cancelledCount}
+          </p>
         </div>
-      </div>
+      </section>
 
-      <div style={styles.filterBar}>
-        <select
-          value={amenityId}
-          onChange={e => setAmenityId(e.target.value)}
-          style={styles.select}
-        >
-          <option value="">All amenities</option>
-          {amenities.map(a => (
-            <option key={a.id} value={a.id}>{a.name}</option>
-          ))}
-        </select>
+      <form onSubmit={handleFilter} style={styles.filterBar} aria-label="Booking filters">
+        <div style={styles.filterField}>
+          <label htmlFor="booking-amenity-filter" style={styles.label}>Amenity</label>
+          <select
+            id="booking-amenity-filter"
+            value={amenityId}
+            onChange={event => setAmenityId(event.target.value)}
+            style={styles.select}
+            disabled={loadingAmenities || controlsDisabled}
+          >
+            <option value="">All amenities</option>
+            {amenities.map(amenity => (
+              <option key={amenity.id} value={amenity.id}>{amenity.name}</option>
+            ))}
+          </select>
+        </div>
 
-        <input
-          type="date"
-          value={date}
-          onChange={e => setDate(e.target.value)}
-          style={styles.dateInput}
-        />
+        <div style={styles.filterField}>
+          <label htmlFor="booking-date-filter" style={styles.label}>Date</label>
+          <input
+            id="booking-date-filter"
+            type="date"
+            value={date}
+            onChange={event => setDate(event.target.value)}
+            style={styles.dateInput}
+            disabled={controlsDisabled}
+          />
+        </div>
 
-        <select
-          value={status}
-          onChange={e => setStatus(e.target.value)}
-          style={styles.select}
-        >
-          <option value="">All statuses</option>
-          <option value="confirmed">Confirmed</option>
-          <option value="cancelled">Cancelled</option>
-          <option value="completed">Completed</option>
-        </select>
+        <div style={styles.filterField}>
+          <label htmlFor="booking-status-filter" style={styles.label}>Status</label>
+          <select
+            id="booking-status-filter"
+            value={status}
+            onChange={event => setStatus(event.target.value as StatusFilter)}
+            style={styles.select}
+            disabled={controlsDisabled}
+          >
+            <option value="">All statuses</option>
+            <option value="confirmed">Confirmed</option>
+            <option value="cancelled">Cancelled</option>
+            <option value="completed">Completed</option>
+          </select>
+        </div>
 
-        <button onClick={handleFilter} style={styles.filterBtn}>
+        <button type="submit" style={styles.filterBtn} disabled={controlsDisabled}>
           Filter
         </button>
-        <button onClick={handleReset} style={styles.resetBtn}>
+        <button
+          type="button"
+          onClick={handleReset}
+          style={styles.resetBtn}
+          disabled={controlsDisabled}
+        >
           Reset
         </button>
-      </div>
+      </form>
 
-      {loading ? (
-        <div style={styles.center}>Loading bookings...</div>
-      ) : bookings.length === 0 ? (
+      {loadingBookings ? (
+        <div style={styles.center} role="status" aria-live="polite">
+          Loading bookings...
+        </div>
+      ) : bookingsError ? null : bookings.length === 0 ? (
         <div style={styles.center}>No bookings found.</div>
       ) : (
-        <div style={styles.tableWrapper}>
+        // Horizontal scrolling keeps every column reachable on small screens. `overflow: hidden` in the original clipped wide table content.
+        <div style={styles.tableWrapper} tabIndex={0} aria-label="Scrollable booking table">
           <table style={styles.table}>
+            <caption style={styles.caption}>Bookings matching the applied filters</caption>
             <thead>
               <tr>
-                <th style={styles.th}>Resident</th>
-                <th style={styles.th}>Amenity</th>
-                <th style={styles.th}>Date</th>
-                <th style={styles.th}>Time</th>
-                <th style={styles.th}>Status</th>
-                <th style={styles.th}>Action</th>
+                <th scope="col" style={styles.th}>Resident</th>
+                <th scope="col" style={styles.th}>Amenity</th>
+                <th scope="col" style={styles.th}>Date</th>
+                <th scope="col" style={styles.th}>Time</th>
+                <th scope="col" style={styles.th}>Status</th>
+                <th scope="col" style={styles.th}>Action</th>
               </tr>
             </thead>
             <tbody>
-              {bookings.map(booking => (
-                <tr key={booking.id} style={styles.tr}>
-                  <td style={styles.td}>
-                    <p style={styles.residentName}>{booking.resident_name}</p>
-                    <p style={styles.residentEmail}>{booking.resident_email}</p>
-                  </td>
-                  <td style={styles.td}>
-                    <p>{booking.amenity_name}</p>
-                    <p style={styles.residentEmail}>{booking.amenity_location}</p>
-                  </td>
-                  <td style={styles.td}>
-                    {new Date(booking.booking_date).toLocaleDateString('ko-KR')}
-                  </td>
-                  <td style={styles.td}>
-                    {booking.start_time.slice(0,5)} — {booking.end_time.slice(0,5)}
-                  </td>
-                  <td style={styles.td}>
-                    <span style={{
-                      ...styles.badge,
-                      ...(booking.status === 'confirmed' ? styles.badgeConfirmed : {}),
-                      ...(booking.status === 'cancelled' ? styles.badgeCancelled : {}),
-                      ...(booking.status === 'completed' ? styles.badgeCompleted : {}),
-                    }}>
-                      {booking.status}
-                    </span>
-                  </td>
-                  <td style={styles.td}>
-                    {booking.status === 'confirmed' && (
-                      <button
-                        onClick={() => handleCancel(booking.id, booking.resident_name)}
-                        style={styles.cancelBtn}
+              {bookings.map(booking => {
+                const cancelling = cancellingId === booking.id;
+                return (
+                  <tr key={booking.id} style={styles.tr}>
+                    <td style={styles.td}>
+                      <p style={styles.residentName}>{booking.resident_name}</p>
+                      <p style={styles.secondaryText}>{booking.resident_email}</p>
+                    </td>
+                    <td style={styles.td}>
+                      <p>{booking.amenity_name}</p>
+                      {booking.amenity_location && (
+                        <p style={styles.secondaryText}>{booking.amenity_location}</p>
+                      )}
+                    </td>
+                    <td style={styles.td}>{formatBookingDate(booking.booking_date)}</td>
+                    <td style={styles.td}>
+                      {booking.start_time.slice(0, 5)} - {booking.end_time.slice(0, 5)}
+                    </td>
+                    <td style={styles.td}>
+                      <span
+                        style={{
+                          ...styles.badge,
+                          ...(booking.status === 'confirmed' ? styles.badgeConfirmed : {}),
+                          ...(booking.status === 'cancelled' ? styles.badgeCancelled : {}),
+                          ...(booking.status === 'completed' ? styles.badgeCompleted : {}),
+                        }}
                       >
-                        Cancel
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
+                        {formatStatus(booking.status)}
+                      </span>
+                    </td>
+                    <td style={styles.td}>
+                      {booking.status === 'confirmed' && (
+                        <button
+                          type="button"
+                          onClick={() => void handleCancel(booking)}
+                          style={styles.cancelBtn}
+                          disabled={cancellingId !== null || loadingBookings}
+                          aria-label={`Cancel ${booking.amenity_name} booking for ${booking.resident_name} on ${booking.booking_date}`}
+                        >
+                          {cancelling ? 'Cancelling...' : 'Cancel'}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       )}
-    </div>
+    </main>
   );
 }
 
-const styles: Record<string, React.CSSProperties> = {
+const styles: Record<string, CSSProperties> = {
   page: {
     maxWidth: '1000px',
     margin:   '0 auto',
