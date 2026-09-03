@@ -1,109 +1,256 @@
-import { useState, useEffect } from 'react';
-import { getOverview, getAmenityStats, getPeakHours } from '../api/stats';
-import type { OverviewStats, AmenityStat, PeakHour } from '../api/stats';
+import { useEffect, useState } from 'react';
+import type { CSSProperties } from 'react';
+import {
+  getAmenityStats,
+  getOverview,
+  getPeakHours,
+} from '../api/stats';
+import type {
+  AmenityStat,
+  OverviewStats,
+  PeakHour,
+} from '../api/stats';
+
+//Keeping the backend query optional
+type AmenityStatWithOptionalId = AmenityStat & { id?: string };
+
+//Preserve useful API error messagse consistently. A fallback covers unusual non-Error throws without hiding normal timeout, network, or server messages.
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
+//These functions prevent accidental string behavior and avoids rendering "NaN" for malformed data
+function toFiniteNumber(value: unknown): number | null {
+  const converted = Number(value);
+  return Number.isFinite(converted) ? converted : null;
+}
+
+function formatCount(value: unknown): string {
+  const converted = toFiniteNumber(value);
+  return converted === null ? 'Unavailable' : converted.toLocaleString('en-US');
+}
+
+function formatPercentage(value: unknown): string {
+  const converted = toFiniteNumber(value);
+  if (converted === null) return 'Unavailable';
+
+  return `${converted.toLocaleString('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 1,
+  })}%`;
+}
 
 export default function AdminDashboardPage() {
-  const [overview,  setOverview]  = useState<OverviewStats | null>(null);
-  const [amenities, setAmenities] = useState<AmenityStat[]>([]);
+  const [overview, setOverview] = useState<OverviewStats | null>(null);
+  const [amenities, setAmenities] = useState<AmenityStatWithOptionalId[]>([]);
   const [peakHours, setPeakHours] = useState<PeakHour[]>([]);
-  const [loading,   setLoading]   = useState(true);
-  const [error,     setError]     = useState('');
+  //Each dashboard resource gets its own loading and error state. These sepearate states allow successful sections to render as soon as they load
+  const [overviewLoading, setOverviewLoading] = useState(true);
+  const [amenitiesLoading, setAmenitiesLoading] = useState(true);
+  const [peakHoursLoading, setPeakHoursLoading] = useState(true);
+  const [overviewError, setOverviewError] = useState('');
+  const [amenitiesError, setAmenitiesError] = useState('');
+  const [peakHoursError, setPeakHoursError] = useState('');
 
+  //Each state update happens after an external request resolves or rejects. Now avoids synchronous setState-in-effect warnings.
   useEffect(() => {
-    async function load() {
+    let active = true;
+
+    async function loadOverview() {
       try {
-        const [ov, am, ph] = await Promise.all([
-          getOverview(),
-          getAmenityStats(),
-          getPeakHours(),
-        ]);
-        setOverview(ov);
-        setAmenities(am);
-        setPeakHours(ph);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load stats');
+        const data = await getOverview();
+        if (active) setOverview(data);
+      } catch (error) {
+        if (active) {
+          setOverviewError(getErrorMessage(error, 'Failed to load overview statistics'));
+        }
       } finally {
-        setLoading(false);
+        if (active) setOverviewLoading(false);
       }
     }
-    load();
+
+    async function loadAmenities() {
+      try {
+        const data = await getAmenityStats();
+        if (active) setAmenities(data);
+      } catch (error) {
+        if (active) {
+          setAmenitiesError(getErrorMessage(error, 'Failed to load amenity statistics'));
+        }
+      } finally {
+        if (active) setAmenitiesLoading(false);
+      }
+    }
+
+    async function loadPeakHours() {
+      try {
+        const data = await getPeakHours();
+        if (active) setPeakHours(data);
+      } catch (error) {
+        if (active) {
+          setPeakHoursError(getErrorMessage(error, 'Failed to load peak-hour statistics'));
+        }
+      } finally {
+        if (active) setPeakHoursLoading(false);
+      }
+    }
+
+    void loadOverview();
+    void loadAmenities();
+    void loadPeakHours();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
-  if (loading) return <div style={styles.center}>Loading dashboard...</div>;
-  if (error)   return <div style={styles.center}>{error}</div>;
-
+  //Used the main landmark and labelled sections
   return (
-    <div style={styles.page}>
+    <main style={styles.page}>
       <h1 style={styles.title}>Admin Dashboard</h1>
 
-      <div style={styles.statsGrid}>
-        <StatCard
-          label="Bookings this month"
-          value={String(overview?.total_bookings_this_month ?? 0)}
-        />
-        <StatCard
-          label="Most booked amenity"
-          value={overview?.most_booked_amenity?.name ?? '—'}
-        />
-        <StatCard
-          label="Busiest day"
-          value={overview?.busiest_day?.day_name?.trim() ?? '—'}
-        />
-        <StatCard
-          label="Cancellation rate"
-          value={`${overview?.cancellation_rate_percent ?? 0}%`}
-        />
-      </div>
+      <section aria-labelledby="overview-heading">
+        <h2 id="overview-heading" style={styles.visuallyHidden}>Booking overview</h2>
 
-      <section style={styles.section}>
-        <h2 style={styles.sectionTitle}>Amenity utilization (last 30 days)</h2>
-        <div style={styles.table}>
-          <div style={styles.tableHeader}>
-            <span>Amenity</span>
-            <span>Bookings</span>
-            <span>Utilization</span>
-          </div>
-          {amenities.map(a => (
-            <div key={a.name} style={styles.tableRow}>
-              <span>{a.name}</span>
-              <span>{a.confirmed_bookings}</span>
-              <span style={styles.utilRate}>
-                {Number(a.utilization_rate_percent).toFixed(1)}%
-              </span>
-            </div>
-          ))}
-        </div>
+        {overviewError && (
+          <div style={styles.error} role="alert">{overviewError}</div>
+        )}
+
+        {/* A definition list expresses label/value statistics more
+            accurately than unrelated paragraphs.*/}
+        <dl style={styles.statsGrid} aria-busy={overviewLoading}>
+          <StatCard
+            label="Bookings this month"
+            value={
+              overviewLoading
+                ? 'Loading...'
+                : overview
+                  ? formatCount(overview.total_bookings_this_month)
+                  : 'Unavailable'
+            }
+          />
+          <StatCard
+            label="Most booked amenity"
+            value={
+              overviewLoading
+                ? 'Loading...'
+                : overview
+                  ? overview.most_booked_amenity?.name ?? 'No bookings yet'
+                  : 'Unavailable'
+            }
+          />
+          <StatCard
+            label="Busiest day"
+            value={
+              overviewLoading
+                ? 'Loading...'
+                : overview
+                  ? overview.busiest_day?.day_name.trim() || 'No bookings yet'
+                  : 'Unavailable'
+            }
+          />
+          <StatCard
+            label="Cancellation rate"
+            value={
+              overviewLoading
+                ? 'Loading...'
+                : overview
+                  ? formatPercentage(overview.cancellation_rate_percent)
+                  : 'Unavailable'
+            }
+          />
+        </dl>
       </section>
 
-      <section style={styles.section}>
-        <h2 style={styles.sectionTitle}>Peak hours</h2>
-        {peakHours.length === 0 ? (
-          <p style={styles.empty}>No data yet.</p>
+      <section style={styles.section} aria-labelledby="amenity-utilization-heading">
+        <h2 id="amenity-utilization-heading" style={styles.sectionTitle}>
+          Amenity utilization (last 30 days)
+        </h2>
+
+        {amenitiesLoading ? (
+          <p style={styles.status} role="status" aria-live="polite">
+            Loading amenity utilization...
+          </p>
+        ) : amenitiesError ? (
+          <div style={styles.error} role="alert">{amenitiesError}</div>
+        ) : amenities.length === 0 ? (
+          // The original amenity table silently displayed only its header when empty. This makes a valid empty result distinguishable from missing UI.
+          <p style={styles.empty}>No amenity utilization data yet.</p>
         ) : (
-          <div style={styles.peakGrid}>
-            {peakHours.map(h => (
-              <div key={h.hour} style={styles.peakCard}>
-                <p style={styles.peakHour}>{h.hour_label}</p>
-                <p style={styles.peakCount}>{h.booking_count} bookings</p>
-              </div>
-            ))}
+          // A semantic table exposes row/column relationships that a grid of generic divs cannot. Horizontal scrolling keeps all columns reachable on narrow screens instead of clipping them.
+          <div
+            style={styles.tableWrapper}
+            tabIndex={0}
+            aria-label="Scrollable amenity utilization table"
+          >
+            <table style={styles.table}>
+              <caption style={styles.caption}>
+                Confirmed bookings and utilization during the last 30 days
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col" style={styles.th}>Amenity</th>
+                  <th scope="col" style={styles.thNumeric}>Bookings</th>
+                  <th scope="col" style={styles.thNumeric}>Utilization</th>
+                </tr>
+              </thead>
+              <tbody>
+                {amenities.map((amenity, index) => (
+                  <tr key={amenity.id ?? `${amenity.name}-${index}`} style={styles.tr}>
+                    <th scope="row" style={styles.rowHeader}>{amenity.name}</th>
+                    <td style={styles.tdNumeric}>
+                      {formatCount(amenity.confirmed_bookings)}
+                    </td>
+                    <td style={{ ...styles.tdNumeric, ...styles.utilRate }}>
+                      {formatPercentage(amenity.utilization_rate_percent)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </section>
-    </div>
+
+      <section style={styles.section} aria-labelledby="peak-hours-heading">
+        <h2 id="peak-hours-heading" style={styles.sectionTitle}>Peak hours</h2>
+
+        {peakHoursLoading ? (
+          <p style={styles.status} role="status" aria-live="polite">
+            Loading peak hours...
+          </p>
+        ) : peakHoursError ? (
+          <div style={styles.error} role="alert">{peakHoursError}</div>
+        ) : peakHours.length === 0 ? (
+          <p style={styles.empty}>No peak-hour data yet.</p>
+        ) : (
+          // A list communicates that these are repeated peer values. The numeric formatter also handles PostgreSQL count strings defensively.
+          <ul style={styles.peakGrid} aria-label="Bookings by start time">
+            {peakHours.map(peakHour => (
+              <li key={peakHour.hour} style={styles.peakCard}>
+                <p style={styles.peakHour}>{peakHour.hour_label}</p>
+                <p style={styles.peakCount}>
+                  {formatCount(peakHour.booking_count)} bookings
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </main>
   );
 }
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
     <div style={styles.statCard}>
-      <p style={styles.statLabel}>{label}</p>
-      <p style={styles.statValue}>{value}</p>
+      <dt style={styles.statLabel}>{label}</dt>
+      <dd style={styles.statValue}>{value}</dd>
     </div>
   );
 }
 
-const styles: Record<string, React.CSSProperties> = {
+const styles: Record<string, CSSProperties> = {
   page: {
     maxWidth: '900px',
     margin:   '0 auto',
