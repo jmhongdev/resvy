@@ -6,32 +6,84 @@ import { useAuth } from '../context/useAuth';
 import { getTodaysBookings } from '../api/bookings';
 import type { Booking } from '../api/bookings';
 
-export default function AmenitiesPage() {
-  const navigate    = useNavigate();
-  const { isAdmin }  = useAuth();
-  const [amenities, setAmenities] = useState<Amenity[]>([]);
-  const [loading,   setLoading]   = useState(true);
-  const [error,     setError]     = useState('');
 
+type CapacityFilter = '' | '5' | '10' | '15' | '20';
+
+// Keep API error handling consistent and preserver useful timeout network, and backend messages.
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
+// Form controls store strings, while the API expects a numeric capacity and comitted empty values. Building the request in one typed helper keeps conversaion and search trimming out the component's request handlers
+function buildFilters(
+  search: string,
+  minCapacity: CapacityFilter,
+  availableToday: boolean
+): AmenityFilters {
+  const normalizedSearch = search.trim();
+  const capacity = minCapacity ? Number(minCapacity) : null;
+
+  return {
+    ...(normalizedSearch ? { search: normalizedSearch } : {}),
+    ...(capacity !== null ? { min_capacity: capacity } : {}),
+    ...(availableToday ? { available_today: true } : {}),
+  };
+}
+
+function hasFilters(filters: AmenityFilters): boolean {
+  return Boolean(
+    filters.search || filters.min_capacity || filters.available_today
+  );
+}
+
+export default function AmenitiesPage() {
+  const { isAdmin } = useAuth();
+  const [amenities, setAmenities] = useState<Amenity[]>([]);
   const [todaysBookings, setTodaysBookings] = useState<Booking[]>([]);
 
-  // Filter state
-  const [search,         setSearch]         = useState('');
-  const [minCapacity,    setMinCapacity]     = useState('');
-  const [availableToday, setAvailableToday] = useState(false);
+  //Amenity serach and today's booking summary are independent resources. Their errors should not overwrite eachtoher, and a banner failure should not prevent the primary amenity catalogue from rendering.
+  const [loadingAmenities, setLoadingAmenities] = useState(true);
+  const [amenitiesError, setAmenitiesError] = useState('');
+  const [todaysBookingsError, setTodaysBookingsError] = useState('');
 
-  const loadAmenities = useCallback(async (filters: AmenityFilters) => {
-    setLoading(true);
-    setError('');
-    try {
-      const data = await getAmenities(filters);
-      setAmenities(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load amenities');
-    } finally {
-      setLoading(false);
+  //Editable draft controls. appliedFilters cahnges only after a successful response. The empty-state copy always describes the data currently on the screen
+  const [search, setSearch] = useState('');
+  const [minCapacity, setMinCapacity] = useState<CapacityFilter>('');
+  const [availableToday, setAvailableToday] = useState(false);
+  const [appliedFilters, setAppliedFilters] = useState<AmenityFilters>({});
+  
+  //Initial catalogue request updates state only after the external request settles and ignores late results after navigation/ Strict Mode cleanup.
+  //Later event driven searches use loadAmenities
+
+  useEffect(() => {
+    let active = true;
+    const requestId = ++amenityRequestIdRef.current;
+
+    async function loadInitialAmenities() {
+      try {
+        const data = await getAmenities();
+        if (active && requestId === amenityRequestIdRef.current) {
+          setAmenities(data);
+          setAppliedFilters({});
+        }
+      } catch (error) {
+        if (active && requestId === amenityRequestIdRef.current) {
+          setAmenitiesError(getErrorMessage(error, 'Failed to load amenities'));
+        }
+      } finally {
+        if (active && requestId === amenityRequestIdRef.current) {
+          setLoadingAmenities(false);
+        }
+      }
     }
+
+    void loadInitialAmenities();
+
+    return () => {
+      active = false;
+    };
   }, []);
+
 
   useEffect(() => {
     async function init() {
