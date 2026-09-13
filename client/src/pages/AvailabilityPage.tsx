@@ -1,34 +1,289 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { DayPicker } from 'react-day-picker';
-import { getAmenity, getAvailability, getClosures } from '../api/amenities';
+import {
+  getAmenity,
+  getAvailability,
+  getClosures,
+} from '../api/amenities';
+import type {
+  Amenity,
+  ClosureInfo,
+  TimeSlot,
+} from '../api/amenities';
 import { createBooking } from '../api/bookings';
-import type { Amenity, TimeSlot, ClosureInfo } from '../api/amenities';
-import 'react-day-picker/dist/style.css';
+import '../resvy/client/node_modules/react-day-picker/dist/style.css';
+
+interface AmenityLoadResult {
+  amenityId: string;
+  data?: Amenity;
+  error?: string;
+}
+
+interface ClosureLoadResult {
+  amenityId: string;
+  data?: ClosureInfo;
+  error?: string;
+}
+
+interface SelectionState {
+  amenityId: string;
+  date?: Date;
+  slot: TimeSlot | null;
+}
+
+interface AvailabilityState {
+  requestKey: string;
+  slots: TimeSlot[];
+}
+
+interface RequestError {
+  requestKey: string;
+  message: string;
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
+  // Date-only API values are built from local calendar fields instead of `toISOString()`, which converts to UTC and can shift the date near midnight.
+function toDateString(date: Date): string {
+  return [
+     date.getFullYear(),
+     String(date.getMonth() + 1).padStart(2, '0'),
+     String(date.getDate()).padStart(2, '0'),
+   ].join('-');
+}
+
+function startOfDay(date: Date): Date {
+  const result = new Date(date);
+  result.setHours(0, 0, 0, 0);
+  return result;
+}
+
+function addDays(date: Date, days: number): Date {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result;
+}
+
+function combineLocalDateAndTime(date: Date, time: string): Date {
+  const result = new Date(date);
+  const [hours, minutes] = time.slice(0, 5).split(':').map(Number);
+  result.setHours(hours, minutes, 0, 0);
+  return result;
+}
+
+function formatSelectedDate(date: Date): string {
+  return new Intl.DateTimeFormat('ko-KR', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  }).format(date);
+}
+
+function getBookingWindowStatus(amenity: Amenity, now: Date): {
+  isOpen: boolean;
+  message: string;
+  nextOpenMessage: string;
+} {
+  if (!amenity.booking_window_start || !amenity.booking_window_end) {
+    return { isOpen: true, message: '', nextOpenMessage: '' };
+  }
+
+  const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(
+    now.getMinutes()
+  ).padStart(2, '0')}`;
+  const windowStart = amenity.booking_window_start.slice(0, 5);
+  const windowEnd = amenity.booking_window_end.slice(0, 5);
+  const isOpen = currentTime >= windowStart && currentTime < windowEnd;
+
+  if (isOpen) {
+    return {
+      isOpen: true,
+      message: `Booking open until ${windowEnd}`,
+      nextOpenMessage: '',
+    };
+  }
+
+  return {
+    isOpen: false,
+    message: 'Booking is currently closed',
+    nextOpenMessage:
+      currentTime < windowStart
+        ? `Opens today at ${windowStart}`
+        : `Opens tomorrow at ${windowStart}`,
+  };
+}
 
 export default function AvailabilityPage() {
-  const { id }   = useParams<{ id: string }>();
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  //Results carry the amenity ID that produced them. React Router can reuse this component when only `:id` changes. Keyed results prevent the previous amenity or closures from flashing under the new URL while its request is pending.
+  const [amenityResult, setAmenityResult] = useState<AmenityLoadResult | null>(null);
+  const [closureResult, setClosureResult] = useState<ClosureLoadResult | null>(null);
+  const [selection, setSelection] = useState<SelectionState>({
+    amenityId: id ?? '',
+    date: undefined,
+    slot: null,
+  });
+  const [availability, setAvailability] = useState<AvailabilityState | null>(null);
+  const [loadingRequestKey, setLoadingRequestKey] = useState<string | null>(null);
+  const [availabilityError, setAvailabilityError] = useState<RequestError | null>(null);
+  const [bookingError, setBookingError] = useState('');
+  const [bookingSuccess, setBookingSuccess] = useState('');
+  const [booking, setBooking] = useState(false);
 
-  const [amenity,      setAmenity]      = useState<Amenity | null>(null);
-  const [slots,        setSlots]        = useState<TimeSlot[]>([]);
-  const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
-  const [closures,     setClosures]     = useState<ClosureInfo | null>(null);
-  const [loading,      setLoading]      = useState(false);
-  const [booking,      setBooking]      = useState(false);
-  const [error,        setError]        = useState('');
-  const [success,      setSuccess]      = useState('');
-  const idempotencyKey = useRef<string>('');
+  // `now` refreshes while the page remains open. The original booking-window banner and button could remain stale forever after crossing an opening/closing boundary.
+  const [now, setNow] = useState(() => new Date());
 
-  // Format Date object to YYYY-MM-DD string
-  function toDateStr(d: Date): string {
-    return [
-      d.getFullYear(),
-      String(d.getMonth() + 1).padStart(2, '0'),
-      String(d.getDate()).padStart(2, '0'),
-    ].join('-');
+  const availabilityRequestIdRef = useRef(0);
+  const bookingInFlightRef = useRef(false);
+  const idempotencyKeyRef = useRef('');
+  const navigationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const amenity =
+    amenityResult && amenityResult.amenityId === id
+      ? amenityResult.data ?? null
+      : null;
+  const amenityError =
+    amenityResult && amenityResult.amenityId === id
+      ? amenityResult.error ?? ''
+      : '';
+  const amenityLoading = Boolean(id) && amenityResult?.amenityId !== id;
+
+  const closures =
+    closureResult && closureResult.amenityId === id
+      ? closureResult.data ?? null
+      : null;
+  const closureError =
+    closureResult && closureResult.amenityId === id
+      ? closureResult.error ?? ''
+      : '';
+  const closuresLoading = Boolean(id) && closureResult?.amenityId !== id;
+
+  const selectedDate = selection.amenityId === id ? selection.date : undefined;
+  const selectedSlot = selection.amenityId === id ? selection.slot : null;
+  const selectedDateString = selectedDate ? toDateString(selectedDate) : '';
+  const currentRequestKey = id && selectedDateString ? `${id}:${selectedDateString}` : '';
+  const slots =
+    availability?.requestKey === currentRequestKey ? availability.slots : [];
+  const slotsLoading = loadingRequestKey === currentRequestKey;
+  const slotsError =
+    availabilityError?.requestKey === currentRequestKey
+      ? availabilityError.message
+      : '';
+
+  const today = startOfDay(now);
+  const maximumDate = useMemo(
+    () => (amenity ? addDays(startOfDay(new Date()), amenity.max_advance_days) : null),
+    [amenity]
+  );
+
+  const holidayDates = useMemo(
+    () => new Set(closures?.holidays.map(holiday => holiday.date) ?? []),
+    [closures]
+  );
+
+  const bookingWindowStatus = amenity
+    ? getBookingWindowStatus(amenity, now)
+    : null;
+  // Amenity and closure requests are independently guarded. A closure failure no longer silently enables dates that may be closed. The calendar fails closed and displays its own error while amenity details remain visible.
+
+  useEffect(() => {
+    if (!id) return;
+
+    let active = true;
+    const amenityId = id;
+
+    async function loadAmenityDetails() {
+      try {
+        const data = await getAmenity(amenityId);
+        if (active) setAmenityResult({ amenityId, data });
+      } catch (error) {
+        if (active) {
+          setAmenityResult({
+            amenityId,
+            error: getErrorMessage(error, 'Failed to load amenity'),
+          });
+        }
+      }
+    }
+
+    async function loadClosureCalendar() {
+      const from = startOfDay(new Date());
+      const to = addDays(from, 90);
+
+      try {
+        const data = await getClosures(
+          amenityId,
+          toDateString(from),
+          toDateString(to)
+        );
+        if (active) setClosureResult({ amenityId, data });
+      } catch (error) {
+        if (active) {
+          setClosureResult({
+            amenityId,
+            error: getErrorMessage(error, 'Failed to load closure calendar'),
+          });
+        }
+      }
+    }
+
+    void loadAmenityDetails();
+    void loadClosureCalendar();
+
+    return () => {
+      active = false;
+    };
+  }, [id]);
+  
+  //timer is an external subscription, so updating state from its callback is an appropriate effect. Cleanup prevents updates after unmount.
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (navigationTimerRef.current) clearTimeout(navigationTimerRef.current);
+    };
+  }, []);
+
+  async function loadSlots(amenityId: string, date: Date) {
+    const dateString = toDateString(date);
+    const requestKey = `${amenityId}:${dateString}`;
+    const requestId = ++availabilityRequestIdRef.current;
+
+    setLoadingRequestKey(requestKey);
+    setAvailabilityError(null);
+    setBookingError('');
+    setBookingSuccess('');
+
+    try {
+      const data = await getAvailability(amenityId, dateString);
+      if (requestId !== availabilityRequestIdRef.current) return;
+
+      setAvailability({ requestKey, slots: data.slots });
+    } catch (error) {
+      if (requestId === availabilityRequestIdRef.current) {
+        setAvailability({ requestKey, slots: [] });
+        setAvailabilityError({
+          requestKey,
+          message: getErrorMessage(error, 'Failed to load availability'),
+        });
+      }
+    } finally {
+      if (requestId === availabilityRequestIdRef.current) {
+        setLoadingRequestKey(null);
+      }
+    }
   }
+
+  //
 
   // Load amenity details
   useEffect(() => {
@@ -351,7 +606,7 @@ export default function AvailabilityPage() {
   );
 }
 
-const styles: Record<string, React.CSSProperties> = {
+const styles: Record<string, CSSProperties> = {
   page: {
     maxWidth: '700px',
     margin:   '0 auto',
